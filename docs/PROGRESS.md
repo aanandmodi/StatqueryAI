@@ -14,13 +14,16 @@ Last updated: 2026-09-01
 - Added a free CPU Docker Space deployment package and configuration helper.
 - Added standalone evaluation-only, Change-VQA and TerraMind fusion `.ipynb` notebooks.
 - Added backend/Space tests and architecture, PRD, security, deployment, free-tier and UI docs.
+- Wired the frontend to real uploads, analysis polling, RGB previews, evidence, warnings, trace and reports.
+- Removed fabricated answer/confidence examples and added explicit free-tier sleeping/quota states.
 
 ## Verified locally
 
 - Backend tests: 15 passed.
+- ML utility tests: 9 passed.
 - Space helper tests: 4 passed.
 - Python source/notebook scripts compile.
-- Ruff passes on backend, deployment package and scripts after the current changes are finalized.
+- Ruff and frontend lint pass; the production Vinext/Sites build completes.
 
 ## External/account-bound steps remaining
 
@@ -33,10 +36,8 @@ Last updated: 2026-09-01
 
 ## Product work remaining
 
-- Wire the existing frontend to the real asset/analysis/events/report APIs.
-- Replace all static answer/confidence/evidence examples with truthful state from the backend.
-- Complete accessibility, responsive and reduced-motion QA.
-- Build and publish the frontend, then run one public end-to-end smoke test.
+- Add the deployed Hugging Face API URL/key to the Sites server-side environment after both Spaces exist.
+- Run one public end-to-end smoke test and final responsive/accessibility acceptance pass.
 
 ## Known constraints
 
@@ -45,4 +46,3 @@ Last updated: 2026-09-01
 - Free ZeroGPU is quota-limited and has no SLA; caching and explicit 503 states are required.
 - Change training requires SECOND imagery, which CDVQA annotations do not redistribute.
 - European Sentinel benchmark performance does not establish Indian Cartosat/RISAT performance.
-

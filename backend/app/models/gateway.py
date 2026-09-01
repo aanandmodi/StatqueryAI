@@ -279,7 +279,7 @@ def render_rgb_preview(path: Path, *, max_edge: int, jpeg_quality: int) -> bytes
                 masked=True,
             )
             bands = [
-                _scale_band(np.ma.filled(data[index], np.nan).astype(np.float32))
+                _scale_band(np.ma.filled(data[index].astype(np.float32), np.nan))
                 for index in range(3)
             ]
             image = Image.fromarray(np.stack(bands, axis=-1), mode="RGB")
