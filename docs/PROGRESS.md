@@ -11,10 +11,14 @@ Last updated: 2026-09-01
 - Built the Gradio ZeroGPU inference package with pinned revisions and bounded API.
 - Added grounding parsing, payload validation and uncalibrated score semantics.
 - Added a FastAPI ZeroGPU gateway with RGB previewing, queue polling, retry and TTL/LRU cache.
-- Added a free CPU Docker Space deployment package and configuration helper.
+- Added a Gradio Server API deployment using the second free ZeroGPU slot.
 - Added standalone evaluation-only, Change-VQA and TerraMind fusion `.ipynb` notebooks.
 - Added backend/Space tests and architecture, PRD, security, deployment, free-tier and UI docs.
-- Wired the frontend to real uploads, analysis polling, RGB previews, evidence, warnings, trace and reports.
+- Wired the frontend to real uploads, analysis polling, RGB/marked-image outputs, evidence, warnings,
+  trace and reports.
+- Added the zero-cost Sites edge inference route and in-browser GeoTIFF preview/overlay export, so
+  the public demo needs only one model Space.
+- Published the free static holding Space with full ZeroGPU source and submitted Community grant #1.
 - Removed fabricated answer/confidence examples and added explicit free-tier sleeping/quota states.
 
 ## Verified locally
@@ -27,22 +31,20 @@ Last updated: 2026-09-01
 
 ## External/account-bound steps remaining
 
-- Upload the model Space with `scripts/deploy_zero_gpu_space.py` using the owner's `HF_TOKEN`.
-- Select ZeroGPU in that Space's hardware settings; never select paid hardware.
-- Deploy/configure the API CPU Space with `scripts/deploy_free_backend_space.py`.
+- Wait for Hugging Face to approve Community grant #1 (or for the account to reach 30 days), then
+  run `scripts/deploy_zero_gpu_space.py` to activate the already-published Gradio source.
 - Run the evaluation-only notebook and retain pinned validation/test output.
 - Attach SECOND and run the Change-VQA notebook; publish only after its PASS gate.
 - Run the TerraMind fusion notebook; publish only after all modality ablations pass.
 
 ## Product work remaining
 
-- Add the deployed Hugging Face API URL/key to the Sites server-side environment after both Spaces exist.
-- Run one public end-to-end smoke test and final responsive/accessibility acceptance pass.
+- Run one public model/API query after the grant activates ZeroGPU; the Sites edge route already
+  targets the permanent Space subdomain and needs no token.
 
 ## Known constraints
 
-- No Hugging Face token is available in this local session, so account-owned Space creation cannot
-  be completed without the owner supplying the secret.
+- The Hugging Face account is too new for its free ZeroGPU allocation; the platform returned 402.
 - Free ZeroGPU is quota-limited and has no SLA; caching and explicit 503 states are required.
 - Change training requires SECOND imagery, which CDVQA annotations do not redistribute.
 - European Sentinel benchmark performance does not establish Indian Cartosat/RISAT performance.

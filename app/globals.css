@@ -189,7 +189,8 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .warning-list { margin-top: 10px; color: #c5cfde; font-size: 8px; }
 .warning-list summary { cursor: pointer; color: #f3d69b; font-weight: 700; }
 .warning-list ul { margin: 7px 0 0; padding-left: 16px; line-height: 1.5; }
-.report-link { width: fit-content; margin-top: 11px; padding: 6px 8px; border: 1px solid rgba(219,246,135,.22); border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; color: #e0f68f; font-size: 8px; font-weight: 700; text-decoration: none; }
+.artifact-links { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.report-link { width: fit-content; padding: 6px 8px; border: 1px solid rgba(219,246,135,.22); border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; color: #e0f68f; background: transparent; font: inherit; font-size: 8px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .trace-card ol { margin: 0; padding: 0 2px; list-style: none; display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; }
 .trace-card li { display: flex; align-items: center; gap: 7px; position: relative; }
 .trace-card li:not(:last-child)::after { content: ''; position: absolute; width: 14px; height: 1px; right: -7px; background: rgba(65,83,113,.15); }

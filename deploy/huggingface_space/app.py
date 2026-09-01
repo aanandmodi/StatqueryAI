@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-import gradio as gr
+import os
+import time
+
+# ZeroGPU must patch CUDA before Gradio, Transformers, or any other library can
+# initialize torch. Expandable segments also prevent avoidable transient OOMs.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import spaces
+
+import gradio as gr
 from PIL import Image
 
 from satquery_space.contracts import build_task_prompt, make_response, validate_request
@@ -14,16 +21,19 @@ RUNTIME = load_runtime()
 
 
 def _analyze(image: Image.Image, task: str, question: str, max_new_tokens: int) -> dict:
+    started = time.perf_counter()
     clean_task, clean_question, token_limit = validate_request(task, question, max_new_tokens)
     prompt = build_task_prompt(clean_task, clean_question)
     answer = generate(RUNTIME, image.convert("RGB"), prompt, token_limit)
     evidence = parse_grounding_boxes(answer) if clean_task == "grounding" else []
-    return make_response(
+    response = make_response(
         task=clean_task,
         answer=answer,
         evidence=evidence,
         model_version=MODEL_VERSION,
     )
+    response["latency_seconds"] = round(time.perf_counter() - started, 3)
+    return response
 
 
 @spaces.GPU(duration=60)
@@ -34,6 +44,7 @@ def analyze_api(image_base64: str, task: str, question: str, max_new_tokens: int
 
 @spaces.GPU(duration=60)
 def analyze_ui(image: Image.Image | None, task: str, question: str, max_new_tokens: int) -> dict:
+    """Analyze one RGB satellite image with the published SatQuery adapter."""
     if image is None:
         raise gr.Error("Upload an RGB satellite image first.")
     return _analyze(image, task, question, max_new_tokens)
@@ -89,4 +100,4 @@ with gr.Blocks(title="SatQuery Qwen3-VL") as demo:
 
 
 if __name__ == "__main__":
-    demo.queue(max_size=16, default_concurrency_limit=1).launch()
+    demo.queue(max_size=16, default_concurrency_limit=1).launch(mcp_server=True)

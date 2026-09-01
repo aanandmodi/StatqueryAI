@@ -2,10 +2,13 @@
 title: SatQuery Qwen3-VL
 emoji: 🛰️
 colorFrom: indigo
-colorTo: cyan
+colorTo: blue
 sdk: gradio
-sdk_version: 5.49.1
+sdk_version: 6.26.0
 app_file: app.py
+python_version: "3.12"
+startup_duration_timeout: 1h
+short_description: Auditable satellite VQA and visual grounding
 pinned: false
 license: apache-2.0
 ---
@@ -31,9 +34,12 @@ endpoint with four inputs:
 The response contains structured text, evidence boxes when parseable, immutable model
 revisions, and an explicit `uncalibrated` score label.
 
+The Space also starts Gradio's MCP server, so the typed endpoint can be discovered by
+compatible agents. ZeroGPU is explicitly selected during deployment; no paid hardware
+fallback is permitted.
+
 ## Zero-cost deployment
 
 Upload this folder to a public Gradio Space, then choose **ZeroGPU** in the Space hardware
 settings. Do not select a paid instance. Free personal accounts in good standing currently
 support up to two ZeroGPU Spaces, subject to Hugging Face quota and availability.
-

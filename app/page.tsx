@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { fromArrayBuffer } from 'geotiff';
 
 import { Button } from '@/components/ui/button';
 
@@ -81,6 +82,17 @@ type AnalysisRecord = {
 
 type AssetRecord = { id: string; original_name: string; size_bytes: number };
 
+type SpaceResult = {
+  text: string;
+  facts?: Array<Record<string, unknown>>;
+  evidence?: Array<Omit<EvidenceItem, 'id'>>;
+  raw_score?: number;
+  score_kind?: string;
+  model_version?: string;
+  warnings?: string[];
+  latency_seconds?: number;
+};
+
 const taskOptions: Array<{ value: Task; label: string; note: string }> = [
   { value: 'single_vqa', label: 'Ask one scene', note: 'Qwen3-VL · released' },
   { value: 'caption', label: 'Describe the scene', note: 'Qwen3-VL · released' },
@@ -121,6 +133,47 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function geotiffPreview(file: File): Promise<string> {
+  const tiff = await fromArrayBuffer(await file.arrayBuffer());
+  const source = await tiff.getImage();
+  const scale = Math.min(1, 1024 / Math.max(source.getWidth(), source.getHeight()));
+  const width = Math.max(1, Math.round(source.getWidth() * scale));
+  const height = Math.max(1, Math.round(source.getHeight() * scale));
+  const sampleCount = Math.max(1, source.getSamplesPerPixel());
+  const samples = sampleCount >= 3 ? [0, 1, 2] : [0];
+  const raster = (await source.readRasters({ width, height, samples, interleave: true })) as unknown as ArrayLike<number>;
+  const channels = samples.length;
+  const ranges = samples.map((_, channel) => {
+    const values: number[] = [];
+    const step = Math.max(1, Math.floor((width * height) / 6000));
+    for (let pixel = 0; pixel < width * height; pixel += step) {
+      const value = Number(raster[pixel * channels + channel]);
+      if (Number.isFinite(value)) values.push(value);
+    }
+    values.sort((a, b) => a - b);
+    if (!values.length) return [0, 1] as const;
+    const low = values[Math.floor(values.length * 0.02)];
+    const high = values[Math.min(values.length - 1, Math.floor(values.length * 0.98))];
+    return high > low ? ([low, high] as const) : ([low, low + 1] as const);
+  });
+
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    for (let channel = 0; channel < 3; channel += 1) {
+      const sourceChannel = channels === 1 ? 0 : channel;
+      const value = Number(raster[pixel * channels + sourceChannel]);
+      const [low, high] = ranges[sourceChannel];
+      pixels[pixel * 4 + channel] = Math.round(Math.max(0, Math.min(1, (value - low) / (high - low))) * 255);
+    }
+    pixels[pixel * 4 + 3] = 255;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d', { alpha: false })?.putImageData(new ImageData(pixels, width, height), 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
 function EvidenceOverlay({ item }: { item: EvidenceItem }) {
   if (item.type !== 'box' || item.coordinate_space !== 'normalized') return null;
   const { x, y, width, height } = item.geometry;
@@ -149,13 +202,16 @@ export default function Home() {
     'grounding',
   ]);
   const [systemState, setSystemState] = useState<'checking' | 'ready' | 'sleeping'>('checking');
+  const [executionMode, setExecutionMode] = useState<'python' | 'edge' | 'unavailable'>('unavailable');
   const [asset, setAsset] = useState<AssetRecord | null>(null);
+  const [previewDataUrl, setPreviewDataUrl] = useState('');
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'working' | 'succeeded' | 'failed'>('idle');
   const [error, setError] = useState('');
 
   const busy = phase === 'uploading' || phase === 'working';
   const result = analysis?.result;
+  const previewSource = previewDataUrl || (asset ? `/api/satquery/assets/${asset.id}/preview` : '');
   const selectedOption = taskOptions.find((option) => option.value === task)!;
   const progress = phase === 'uploading' ? 0.04 : analysis?.progress ?? 0;
   const uncalibrated = result?.confidence.calibration_version.includes('uncalibrated');
@@ -192,16 +248,31 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      jsonRequest<{ status: string }>('/api/satquery/health/ready'),
-      jsonRequest<{ tasks: Task[] }>('/api/satquery/capabilities'),
-    ])
-      .then(([, capabilities]) => {
+    async function checkSystems() {
+      try {
+        const [, capabilities] = await Promise.all([
+          jsonRequest<{ status: string }>('/api/satquery/health/ready'),
+          jsonRequest<{ tasks: Task[] }>('/api/satquery/capabilities'),
+        ]);
         if (!active) return;
         setAvailableTasks(capabilities.tasks);
+        setExecutionMode('python');
         setSystemState('ready');
-      })
-      .catch(() => active && setSystemState('sleeping'));
+      } catch {
+        try {
+          const direct = await jsonRequest<{ tasks: Task[] }>('/api/satquery/direct');
+          if (!active) return;
+          setAvailableTasks(direct.tasks);
+          setExecutionMode('edge');
+          setSystemState('ready');
+        } catch {
+          if (!active) return;
+          setExecutionMode('unavailable');
+          setSystemState('sleeping');
+        }
+      }
+    }
+    void checkSystems();
     return () => {
       active = false;
     };
@@ -211,6 +282,7 @@ export default function Home() {
     const selected = event.target.files?.[0] ?? null;
     setError('');
     setAsset(null);
+    setPreviewDataUrl('');
     setAnalysis(null);
     setPhase('idle');
     if (!selected) {
@@ -248,6 +320,46 @@ export default function Home() {
     setAsset(null);
     setPhase('uploading');
     try {
+      if (executionMode !== 'python') {
+        const preview = await geotiffPreview(file);
+        const edgeAsset = { id: `edge_${crypto.randomUUID().replaceAll('-', '')}`, original_name: file.name, size_bytes: file.size };
+        setPreviewDataUrl(preview);
+        setAsset(edgeAsset);
+        setPhase('working');
+        const output = await jsonRequest<SpaceResult>('/api/satquery/direct', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ image_base64: preview, task, question: query.trim(), max_new_tokens: 128 }),
+        });
+        const evidence = (output.evidence ?? []).map((item) => ({ ...item, id: crypto.randomUUID() }));
+        const completed: AnalysisRecord = {
+          id: `edge_${crypto.randomUUID().replaceAll('-', '')}`,
+          status: 'succeeded',
+          progress: 1,
+          result: {
+            answer: output.text,
+            facts: output.facts ?? [],
+            evidence,
+            confidence: {
+              score: Math.max(0, Math.min(1, output.raw_score ?? 0.5)),
+              level: 'low',
+              calibration_version: output.score_kind === 'calibrated_probability' ? 'specialist-calibration-v1' : 'uncalibrated-evidence-quality',
+              meaning: 'Evidence-quality score only; this model has no calibrated probability of correctness.',
+            },
+            trace: [{
+              step_id: 'edge-inference', task, tool: 'sites-edge-to-zerogpu', status: 'succeeded',
+              model_version: output.model_version, policy_reason: 'Released single-image task routed to the pinned public Space.',
+              duration_ms: output.latency_seconds ? Math.round(output.latency_seconds * 1000) : undefined,
+            }],
+            warnings: output.warnings ?? [],
+            provenance: { execution_mode: 'sites-edge', source_name: file.name },
+          },
+        };
+        setAnalysis(completed);
+        setPhase('succeeded');
+        return;
+      }
+
       const form = new FormData();
       form.append('file', file);
       form.append('modality', 'optical');
@@ -295,8 +407,48 @@ export default function Home() {
     setFile(null);
     setAsset(null);
     setAnalysis(null);
+    setPreviewDataUrl('');
     setPhase('idle');
     if (inputRef.current) inputRef.current.value = '';
+  }
+
+  async function downloadMarkedImage() {
+    if (!previewSource || !result) return;
+    const source = new window.Image();
+    source.decoding = 'async';
+    source.src = previewSource;
+    await new Promise<void>((resolve, reject) => {
+      source.onload = () => resolve();
+      source.onerror = () => reject(new Error('Could not load the preview for export.'));
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = source.naturalWidth;
+    canvas.height = source.naturalHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(source, 0, 0);
+    context.lineWidth = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) / 180));
+    context.font = `${Math.max(12, Math.round(Math.min(canvas.width, canvas.height) / 32))}px sans-serif`;
+    for (const item of result.evidence) {
+      if (item.type !== 'box' || item.coordinate_space !== 'normalized') continue;
+      const { x, y, width, height } = item.geometry;
+      context.strokeStyle = '#6dffc5';
+      context.fillStyle = '#09161e';
+      context.strokeRect(x * canvas.width, y * canvas.height, width * canvas.width, height * canvas.height);
+      const metrics = context.measureText(item.label);
+      const labelY = Math.max(20, y * canvas.height);
+      context.fillRect(x * canvas.width, labelY - 20, metrics.width + 12, 22);
+      context.fillStyle = '#6dffc5';
+      context.fillText(item.label, x * canvas.width + 6, labelY - 4);
+    }
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `satquery-${analysis?.id ?? 'analysis'}-overlay.jpg`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -410,7 +562,7 @@ export default function Home() {
               <span>{result?.evidence.length ?? 0} regions</span>
             </div>
             <figure className={`evidence-map ${asset ? 'has-preview' : ''}`} aria-label={asset ? 'RGB preview of the uploaded raster with model evidence overlays' : 'Empty satellite evidence canvas'}>
-              {asset ? <Image src={`/api/satquery/assets/${asset.id}/preview`} alt="RGB preview generated from the uploaded raster" fill sizes="(max-width: 1050px) 60vw, 38vw" unoptimized /> : <div className="empty-orbit" aria-hidden="true"><Orbit /><span>Awaiting scene</span></div>}
+              {asset && previewSource ? <Image src={previewSource} alt="RGB preview generated from the uploaded raster" fill sizes="(max-width: 1050px) 60vw, 38vw" unoptimized /> : <div className="empty-orbit" aria-hidden="true"><Orbit /><span>Awaiting scene</span></div>}
               <div className="map-grid" />
               {result?.evidence.map((item) => <EvidenceOverlay key={item.id} item={item} />)}
               <div className="map-coordinates">SOURCE LOCKED<br />MODEL OVERLAY</div>
@@ -426,7 +578,12 @@ export default function Home() {
             <p>{result?.confidence.meaning || 'Scores stay hidden until a real specialist returns; SatQuery never invents a confidence percentage.'}</p>
             {result && !uncalibrated && <div className="confidence-track"><span style={{ width: `${result.confidence.score * 100}%` }} /></div>}
             {result?.warnings.length ? <details className="warning-list"><summary>{result.warnings.length} model warning{result.warnings.length === 1 ? '' : 's'}</summary><ul>{result.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
-            {analysis?.status === 'succeeded' && result?.report_url && <a className="report-link" href={`/api/satquery/analyses/${analysis.id}/report`}><ArrowDownToLine size={14} /> Download audit report</a>}
+            {analysis?.status === 'succeeded' && (
+              <div className="artifact-links">
+                <button className="report-link" type="button" onClick={downloadMarkedImage}><ArrowDownToLine size={14} /> Download marked image</button>
+                {executionMode === 'python' && result?.report_url && <a className="report-link" href={`/api/satquery/analyses/${analysis.id}/report`}><ArrowDownToLine size={14} /> Download audit report</a>}
+              </div>
+            )}
           </section>
 
           <section className="trace-card glass-panel" id="trace">

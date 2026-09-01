@@ -4,7 +4,8 @@ import argparse
 import os
 from pathlib import Path
 
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, SpaceHardware
+from huggingface_hub.errors import HfHubHTTPError
 
 
 DEFAULT_REPO = "aanandmodi/satquery-qwen3vl-space"
@@ -30,25 +31,36 @@ def main() -> None:
         raise SystemExit(f"Space directory does not exist: {args.space_dir}")
 
     api = HfApi(token=token)
-    api.create_repo(
-        repo_id=args.repo_id,
-        repo_type="space",
-        space_sdk="gradio",
-        private=args.private,
-        exist_ok=True,
-    )
+    try:
+        api.create_repo(
+            repo_id=args.repo_id,
+            repo_type="space",
+            space_sdk="gradio",
+            space_hardware=SpaceHardware.ZERO_A10G,
+            private=args.private,
+            exist_ok=True,
+        )
+    except HfHubHTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 402:
+            raise SystemExit(
+                "ZeroGPU is unavailable to this account. Run "
+                "scripts/request_zero_gpu_grant.py; never fall back to paid hardware."
+            ) from exc
+        raise
+    # create_repo(exist_ok=True) preserves old settings, so explicitly enforce
+    # the only unpaid Gradio tier. Never substitute a billable accelerator.
+    api.request_space_hardware(args.repo_id, SpaceHardware.ZERO_A10G)
     commit = api.upload_folder(
         repo_id=args.repo_id,
         repo_type="space",
         folder_path=args.space_dir,
-        ignore_patterns=["tests/**", "**/__pycache__/**", ".pytest_cache/**"],
+        ignore_patterns=["tests/**", "**/__pycache__/**", "*__pycache__*", "*.pyc", ".pytest_cache/**"],
         commit_message="Deploy pinned SatQuery ZeroGPU inference service",
     )
     print(f"Uploaded commit: {commit.oid}")
     print(f"Space: https://huggingface.co/spaces/{args.repo_id}")
-    print("Required account step: Settings -> Hardware -> ZeroGPU. Do not choose paid hardware.")
+    print("Hardware: ZeroGPU (zero-a10g). This script never requests paid hardware.")
 
 
 if __name__ == "__main__":
     main()
-

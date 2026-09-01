@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SatQuery · ZeroGPU grant pending</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; color: #eef8f4;
+        background: radial-gradient(circle at 18% 10%, #153d4d 0, transparent 38%),
+          radial-gradient(circle at 88% 80%, #312b62 0, transparent 40%), #071217; }
+      main { width: min(760px, calc(100% - 32px)); padding: 42px; border: 1px solid #ffffff1c;
+        border-radius: 28px; background: #ffffff0b; box-shadow: 0 32px 90px #0008;
+        backdrop-filter: blur(22px); }
+      .orbit { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid #7fffd455;
+        border-radius: 20px; color: #9ef5d5; font-size: 29px; transform: rotate(-5deg); }
+      .eyebrow { margin-top: 26px; color: #9ef5d5; font-size: 12px; font-weight: 800;
+        letter-spacing: .16em; text-transform: uppercase; }
+      h1 { margin: 10px 0 12px; font-size: clamp(38px, 7vw, 72px); line-height: .95;
+        letter-spacing: -.055em; }
+      p { color: #bad0ce; line-height: 1.65; max-width: 62ch; }
+      .status { margin: 28px 0; padding: 16px 18px; border-radius: 16px; background: #9ef5d511;
+        border: 1px solid #9ef5d530; display: flex; gap: 12px; align-items: center; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: #f4cf6a;
+        box-shadow: 0 0 20px #f4cf6aaa; flex: 0 0 auto; }
+      a { color: #d9f58f; font-weight: 750; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      small { display: block; color: #76918f; margin-top: 24px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="orbit" aria-hidden="true">◉</div>
+      <div class="eyebrow">SatQuery · public SIH build</div>
+      <h1>Ask the landscape.</h1>
+      <p>An auditable remote-sensing assistant built on a fine-tuned Qwen3-VL adapter. It returns
+        text answers and normalized visual grounding boxes without inventing calibrated confidence.</p>
+      <div class="status"><span class="dot"></span><span><strong>ZeroGPU grant pending.</strong>
+        The complete deployable source is already published in this Space.</span></div>
+      <p>Review the <a href="https://huggingface.co/aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora">model card</a>
+        or the <a href="./tree/main/zero_gpu_app">ZeroGPU application source</a>.</p>
+      <small>No paid endpoint or dedicated accelerator will be provisioned.</small>
+    </main>
+  </body>
+</html>
+

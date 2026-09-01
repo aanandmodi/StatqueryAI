@@ -97,6 +97,12 @@ def test_upload_analyse_trace_and_report(tmp_path: Path):
         assert report.headers["content-type"] == "application/pdf"
         assert report.content.startswith(b"%PDF")
 
+        overlay = client.get(f"/v1/analyses/{analysis_id}/overlay")
+        assert overlay.status_code == 200
+        assert overlay.headers["content-type"] == "image/jpeg"
+        assert "attachment" in overlay.headers["content-disposition"]
+        assert overlay.content.startswith(b"\xff\xd8\xff")
+
 
 def test_plain_png_rejected_outside_benchmark(tmp_path: Path):
     runtime = tmp_path / "runtime"

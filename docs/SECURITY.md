@@ -3,7 +3,8 @@
 ## Secrets
 
 - `HF_TOKEN` is used only for deployment/upload and optional authenticated Space quota.
-- `SATQUERY_API_KEY` is shared only between the server-side frontend proxy and API Space.
+- `SATQUERY_API_KEY` is used only by the optional Python controller deployment. The default Sites
+  edge route needs no application secret because it calls a public Space.
 - Neither value may enter React client code, notebook source/output, Git history or screenshots.
 - Production startup fails when the API key is absent or the demo gateway is selected.
 
@@ -25,8 +26,10 @@
 
 ## Free public deployment limitations
 
-The CPU Space uses ephemeral local storage. Do not upload imagery that is confidential, regulated,
-or unsafe to process on public third-party infrastructure. A production deployment would require
+The public edge path creates a bounded RGB preview in the browser and sends that preview to a public
+Space; the original GeoTIFF stays in the browser. The optional Python Space uses ephemeral local
+storage. Do not upload imagery that is confidential, regulated, or unsafe to process on public
+third-party infrastructure. A production deployment would require
 private networking, authenticated object storage, retention/deletion controls, malware scanning,
 rate limiting, audit export and an organizational privacy assessment.
 
@@ -34,4 +37,3 @@ rate limiting, audit export and an organizational privacy assessment.
 
 Do not include access tokens or private imagery in an issue. Record the request ID, analysis ID,
 error code, model revision and sanitized trace.
-

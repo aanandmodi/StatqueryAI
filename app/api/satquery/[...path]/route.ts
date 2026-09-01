@@ -10,6 +10,7 @@ const READ_PATHS = [
   /^assets\/ast_[a-f0-9]+\/preview$/,
   /^analyses\/anl_[a-f0-9]+$/,
   /^analyses\/anl_[a-f0-9]+\/report$/,
+  /^analyses\/anl_[a-f0-9]+\/overlay$/,
 ];
 const WRITE_PATHS = [/^assets$/, /^analyses$/];
 
@@ -95,4 +96,3 @@ export async function GET(request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   return proxy(request, context, 'POST');
 }
-

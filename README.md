@@ -13,14 +13,17 @@ Face Dedicated Inference Endpoints or other billed GPU instances.
 | Component | Status | Evidence |
 |---|---|---|
 | Qwen3-VL BigEarthNet.txt LoRA | Released | Public, pinned Hub adapter; fresh reload passed |
-| Single-image VQA/caption/grounding | Ready to deploy | ZeroGPU Gradio package and API contract complete |
+| Single-image VQA/caption/grounding | Grant pending | Full source public in the holding Space; account-age gate returned 402 |
 | FastAPI controller | Implemented | Upload validation, policy routing, queue bridge, cache, trace, report |
+| Sites edge API | Deployed source | One-Space zero-cost route with bounded request/response validation |
 | Evaluation-only workflow | Ready to run | Pinned validation/test notebook; no retraining |
 | Change-VQA | Training workflow ready | Requires the SECOND pixels attached in Kaggle |
 | Optical/SAR fusion | Training workflow ready | Uses the bounded paired S1/S2 LMDB subset and TerraMind |
-| Frontend | Visual prototype | API wiring and final QA intentionally follow backend/model completion |
+| Frontend | Built and wired | GeoTIFF preview, real Space API, text, overlays, marked-image export |
 
 Published adapter: [aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora](https://huggingface.co/aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora), pinned by the deployment code at `ed12e59e0def9468bdf4a226789fc1b77c7900e7`.
+
+Grant-pending Space: [aanandmodi/satquery-qwen3vl-space](https://huggingface.co/spaces/aanandmodi/satquery-qwen3vl-space). Its static page and complete `zero_gpu_app/` source are public; Community grant discussion #1 is open.
 
 ## Repository map
 
@@ -28,7 +31,8 @@ Published adapter: [aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora](https://hu
 app/                              Vinext/React frontend
 backend/                          FastAPI controller and tests
 deploy/huggingface_space/         Qwen3-VL Gradio ZeroGPU service
-deploy/huggingface_backend/       Free CPU Docker Space container
+deploy/huggingface_backend/       Optional full Python controller Space package
+deploy/huggingface_space_holding/ Free grant-pending public Space page
 ml/                               Reusable specialist-model utilities
 model_service/                    Long-lived GPU service for non-Space deployments
 notebooks/                        Kaggle/Colab training and evaluation notebooks
@@ -79,4 +83,3 @@ npm run build
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md), [PRD.md](docs/PRD.md),
 [FREE_TIER_RUNBOOK.md](docs/FREE_TIER_RUNBOOK.md), and [PROGRESS.md](docs/PROGRESS.md).
-

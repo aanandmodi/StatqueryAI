@@ -65,9 +65,7 @@ def build_container(settings: Settings) -> AppContainer:
     )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    settings = settings or get_settings()
-
+def build_lifespan(settings: Settings):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.container = build_container(settings)
@@ -79,18 +77,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if close_gateway is not None:
             await close_gateway()
 
-    app = FastAPI(
-        title=settings.app_name,
-        version=__version__,
-        description=(
-            "Auditable remote-sensing analysis gateway with fail-closed raster validation, "
-            "deterministic routing and specialist model isolation."
-        ),
-        docs_url="/docs" if settings.enable_docs else None,
-        redoc_url="/redoc" if settings.enable_docs else None,
-        openapi_url="/openapi.json" if settings.enable_docs else None,
-        lifespan=lifespan,
-    )
+    return lifespan
+
+
+def configure_app(app: FastAPI, settings: Settings) -> FastAPI:
+    """Attach SatQuery middleware, errors and routes to a FastAPI-compatible app."""
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -131,6 +123,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(router, prefix=settings.api_prefix)
     return app
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    app = FastAPI(
+        title=settings.app_name,
+        version=__version__,
+        description=(
+            "Auditable remote-sensing analysis gateway with fail-closed raster validation, "
+            "deterministic routing and specialist model isolation."
+        ),
+        docs_url="/docs" if settings.enable_docs else None,
+        redoc_url="/redoc" if settings.enable_docs else None,
+        openapi_url="/openapi.json" if settings.enable_docs else None,
+        lifespan=build_lifespan(settings),
+    )
+    return configure_app(app, settings)
 
 
 app = create_app()

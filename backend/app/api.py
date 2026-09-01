@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import secrets
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from PIL import Image, ImageDraw
 
 from app.config import Settings
 from app.errors import NotFoundError, ValidationFailure
@@ -167,6 +169,50 @@ async def preview_asset(asset_id: str, request: Request) -> Response:
     )
 
 
+def _draw_overlay(preview: bytes, evidence: list[Any]) -> bytes:
+    """Burn normalized model boxes into a downloadable JPEG artifact."""
+
+    with Image.open(io.BytesIO(preview)) as source:
+        image = source.convert("RGB")
+    draw = ImageDraw.Draw(image)
+    line_width = max(2, round(min(image.size) / 180))
+    for item in evidence:
+        if item.type != "box" or item.coordinate_space != "normalized":
+            continue
+        geometry = item.geometry
+        try:
+            x = max(0.0, min(1.0, float(geometry["x"])))
+            y = max(0.0, min(1.0, float(geometry["y"])))
+            width = max(0.0, min(1.0 - x, float(geometry["width"])))
+            height = max(0.0, min(1.0 - y, float(geometry["height"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if width <= 0 or height <= 0:
+            continue
+        box = (
+            round(x * image.width),
+            round(y * image.height),
+            round((x + width) * image.width),
+            round((y + height) * image.height),
+        )
+        color = (109, 255, 197)
+        draw.rectangle(box, outline=color, width=line_width)
+        label = str(item.label).strip()[:80] or "model evidence"
+        text_box = draw.textbbox((box[0], box[1]), label)
+        text_width = text_box[2] - text_box[0]
+        text_height = text_box[3] - text_box[1]
+        label_top = max(0, box[1] - text_height - 8)
+        draw.rectangle(
+            (box[0], label_top, min(image.width, box[0] + text_width + 10), box[1]),
+            fill=(9, 22, 30),
+        )
+        draw.text((box[0] + 5, label_top + 3), label, fill=color)
+
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=92, optimize=True)
+    return output.getvalue()
+
+
 @protected.post(
     "/analyses",
     response_model=AnalysisRecord,
@@ -221,6 +267,32 @@ async def download_report(analysis_id: str, request: Request) -> FileResponse:
         path,
         media_type="application/pdf",
         filename=f"satquery-{analysis_id}.pdf",
+    )
+
+
+@protected.get("/analyses/{analysis_id}/overlay", tags=["analyses"])
+async def download_overlay(analysis_id: str, request: Request) -> Response:
+    state = container(request)
+    record = await state.repository.get_analysis(analysis_id)
+    if record.result is None:
+        raise NotFoundError("Marked image is not available for this analysis")
+    assets = await state.repository.get_assets(record.request.asset_ids)
+    if not assets:
+        raise NotFoundError("Source asset is missing")
+    preview = await asyncio.to_thread(
+        render_rgb_preview,
+        state.asset_store.resolve(assets[0].id),
+        max_edge=state.settings.space_preview_max_edge,
+        jpeg_quality=state.settings.space_preview_jpeg_quality,
+    )
+    overlay = await asyncio.to_thread(_draw_overlay, preview, record.result.evidence)
+    return Response(
+        content=overlay,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Disposition": f'attachment; filename="satquery-{analysis_id}-overlay.jpg"',
+        },
     )
 
 

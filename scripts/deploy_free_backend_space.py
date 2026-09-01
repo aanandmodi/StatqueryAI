@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, SpaceHardware
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +21,7 @@ def require_secret(name: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Deploy SatQuery API to a free CPU Docker Space; no paid hardware is requested."
+        description="Deploy SatQuery API to the second free ZeroGPU slot; never request paid hardware."
     )
     parser.add_argument("--repo-id", default="aanandmodi/satquery-api")
     parser.add_argument(
@@ -37,15 +37,17 @@ def main() -> None:
     api.create_repo(
         repo_id=args.repo_id,
         repo_type="space",
-        space_sdk="docker",
+        space_sdk="gradio",
+        space_hardware=SpaceHardware.ZERO_A10G,
         private=False,
         exist_ok=True,
     )
+    api.request_space_hardware(args.repo_id, SpaceHardware.ZERO_A10G)
 
     with tempfile.TemporaryDirectory(prefix="satquery-api-space-") as temporary:
         stage = Path(temporary)
         shutil.copy2(PROJECT_ROOT / "deploy" / "huggingface_backend" / "README.md", stage)
-        shutil.copy2(PROJECT_ROOT / "deploy" / "huggingface_backend" / "Dockerfile", stage)
+        shutil.copy2(PROJECT_ROOT / "deploy" / "huggingface_backend" / "app.py", stage)
         shutil.copy2(PROJECT_ROOT / "backend" / "requirements.txt", stage)
         shutil.copytree(
             PROJECT_ROOT / "backend" / "app",
@@ -56,7 +58,7 @@ def main() -> None:
             repo_id=args.repo_id,
             repo_type="space",
             folder_path=stage,
-            commit_message="Deploy SatQuery free CPU orchestration API",
+            commit_message="Deploy SatQuery free ZeroGPU orchestration API",
         )
 
     variables = {
@@ -65,6 +67,7 @@ def main() -> None:
         "SATQUERY_SPACE_URL": args.model_space_url,
         "SATQUERY_ALLOWED_ORIGINS": args.allowed_origin,
         "SATQUERY_ENABLE_DOCS": "false",
+        "GRADIO_SSR_MODE": "false",
         "SATQUERY_MAX_UPLOAD_BYTES": str(50 * 1024 * 1024),
         "SATQUERY_JOB_TIMEOUT_SECONDS": "600",
     }
@@ -80,9 +83,8 @@ def main() -> None:
     print(f"Uploaded commit: {commit.oid}")
     print(f"API Space: https://huggingface.co/spaces/{args.repo_id}")
     print(f"Readiness: https://{args.repo_id.replace('/', '-')}.hf.space/v1/health/ready")
-    print("Hardware remains the default free CPU Basic tier; this script never requests paid hardware.")
+    print("Hardware: ZeroGPU (zero-a10g). Orchestration routes do not reserve GPU time.")
 
 
 if __name__ == "__main__":
     main()
-
