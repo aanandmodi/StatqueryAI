@@ -1,0 +1,2 @@
+"""SatQuery ZeroGPU inference package."""
+

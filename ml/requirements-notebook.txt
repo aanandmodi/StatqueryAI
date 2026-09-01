@@ -1,0 +1,19 @@
+# Qwen's official fine-tuning framework pins the core versions below.
+# Use on Linux Kaggle/Colab GPU runtimes; do not install into the API container.
+torch==2.6.0
+torchvision==0.21.0
+transformers==4.57.0
+accelerate==1.7.0
+peft==0.17.1
+bitsandbytes==0.47.0
+datasets==4.0.0
+huggingface-hub==0.34.4
+safetensors==0.5.3
+scikit-learn==1.7.1
+evaluate==0.4.5
+rasterio==1.4.3
+pillow==11.3.0
+sentencepiece==0.2.1
+qwen-vl-utils==0.0.14
+terratorch>=1.2.5,<2
+einops>=0.8,<1

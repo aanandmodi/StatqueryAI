@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "satquery-model-service"
+version = "0.1.0"
+description = "Long-lived GPU inference service for SatQuery specialists"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "numpy>=2,<3",
+  "pydantic-settings>=2.7,<3",
+  "python-multipart>=0.0.20,<1",
+  "safetensors>=0.5,<1",
+  "torch>=2.6,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["satquery_model_service"]
+

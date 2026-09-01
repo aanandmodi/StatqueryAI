@@ -1,0 +1,8 @@
+transformers==4.57.1
+peft==0.17.1
+accelerate==1.7.0
+huggingface-hub==0.36.2
+qwen-vl-utils==0.0.14
+safetensors>=0.5,<1
+Pillow>=11,<13
+
