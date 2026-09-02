@@ -135,6 +135,13 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .task-picker label { color: #6d788b; font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 750; }
 .task-picker select { min-width: 0; border: 1px solid rgba(70,90,122,.12); border-radius: 12px; padding: 8px 30px 8px 10px; background: rgba(255,255,255,.65); color: var(--ink); font-size: 10px; cursor: pointer; }
 .task-picker > span { color: #68768a; font: 600 8px var(--font-geist-mono); }
+.location-context { margin: 11px 0 0; padding: 11px; border: 1px solid rgba(70,90,122,.1); border-radius: 17px; background: rgba(238,244,249,.52); display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.location-context legend { padding: 0 5px; color: #53627a; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: .09em; }
+.location-context legend span { color: #8893a4; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.location-context label { color: #6d788b; font-size: 8px; font-weight: 700; }
+.location-context input { width: 100%; margin-top: 4px; padding: 8px 9px; border: 1px solid rgba(70,90,122,.12); border-radius: 11px; outline: 0; background: rgba(255,255,255,.72); color: var(--ink); font-size: 10px; }
+.location-context input:focus { border-color: rgba(89,119,248,.5); box-shadow: 0 0 0 3px rgba(89,119,248,.08); }
+.location-context p { grid-column: 1/-1; margin: 1px 2px 0; color: #778397; font-size: 8px; line-height: 1.4; }
 .prompt-box { margin-top: 11px; border: 1px solid rgba(255,255,255,.8); background: rgba(255,255,255,.63); border-radius: 19px 19px 25px 19px; padding: 14px; box-shadow: inset 0 0 0 1px rgba(53,72,104,.04); }
 .prompt-box label { color: #6d788b; font-size: 9px; text-transform: uppercase; letter-spacing: .11em; font-weight: 750; }
 .prompt-box textarea { resize: none; display: block; width: 100%; min-height: 94px; padding: 8px 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 14px; line-height: 1.55; }
@@ -234,6 +241,7 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
   .upload-grid.single-upload { grid-template-columns: 1fr; }
   .clear-file { min-height: 38px; justify-content: center; }
   .task-picker { grid-template-columns: 1fr; gap: 5px; }
+  .location-context { grid-template-columns: 1fr 1fr; }
   .prompt-footer { align-items: stretch; flex-direction: column; }
   .run-button { width: 100%; }
   .insight-column { grid-column: 1; display: flex; padding-bottom: 82px; }

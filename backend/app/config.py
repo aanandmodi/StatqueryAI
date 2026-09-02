@@ -93,6 +93,14 @@ class Settings(BaseSettings):
             raise RuntimeError("SATQUERY_API_KEY is required in production")
         if self.model_backend == "space" and not self.space_url:
             raise RuntimeError("SATQUERY_SPACE_URL is required when model_backend=space")
+        if (
+            self.model_backend == "http"
+            and self.model_service_url.lower().startswith("https://")
+            and not self.model_service_token
+        ):
+            raise RuntimeError(
+                "SATQUERY_MODEL_SERVICE_TOKEN is required for a remote HTTPS model service"
+            )
 
     def service_url_for_task(self, task: str) -> str:
         if task in {"single_vqa", "caption", "grounding"}:

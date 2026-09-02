@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
-import { fromArrayBuffer } from 'geotiff';
 
 import { Button } from '@/components/ui/button';
 
@@ -82,17 +81,6 @@ type AnalysisRecord = {
 
 type AssetRecord = { id: string; original_name: string; size_bytes: number };
 
-type SpaceResult = {
-  text: string;
-  facts?: Array<Record<string, unknown>>;
-  evidence?: Array<Omit<EvidenceItem, 'id'>>;
-  raw_score?: number;
-  score_kind?: string;
-  model_version?: string;
-  warnings?: string[];
-  latency_seconds?: number;
-};
-
 const taskOptions: Array<{ value: Task; label: string; note: string }> = [
   { value: 'single_vqa', label: 'Ask one scene', note: 'Qwen3-VL · released' },
   { value: 'caption', label: 'Describe the scene', note: 'Qwen3-VL · released' },
@@ -133,47 +121,6 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function geotiffPreview(file: File): Promise<string> {
-  const tiff = await fromArrayBuffer(await file.arrayBuffer());
-  const source = await tiff.getImage();
-  const scale = Math.min(1, 1024 / Math.max(source.getWidth(), source.getHeight()));
-  const width = Math.max(1, Math.round(source.getWidth() * scale));
-  const height = Math.max(1, Math.round(source.getHeight() * scale));
-  const sampleCount = Math.max(1, source.getSamplesPerPixel());
-  const samples = sampleCount >= 3 ? [0, 1, 2] : [0];
-  const raster = (await source.readRasters({ width, height, samples, interleave: true })) as unknown as ArrayLike<number>;
-  const channels = samples.length;
-  const ranges = samples.map((_, channel) => {
-    const values: number[] = [];
-    const step = Math.max(1, Math.floor((width * height) / 6000));
-    for (let pixel = 0; pixel < width * height; pixel += step) {
-      const value = Number(raster[pixel * channels + channel]);
-      if (Number.isFinite(value)) values.push(value);
-    }
-    values.sort((a, b) => a - b);
-    if (!values.length) return [0, 1] as const;
-    const low = values[Math.floor(values.length * 0.02)];
-    const high = values[Math.min(values.length - 1, Math.floor(values.length * 0.98))];
-    return high > low ? ([low, high] as const) : ([low, low + 1] as const);
-  });
-
-  const pixels = new Uint8ClampedArray(width * height * 4);
-  for (let pixel = 0; pixel < width * height; pixel += 1) {
-    for (let channel = 0; channel < 3; channel += 1) {
-      const sourceChannel = channels === 1 ? 0 : channel;
-      const value = Number(raster[pixel * channels + sourceChannel]);
-      const [low, high] = ranges[sourceChannel];
-      pixels[pixel * 4 + channel] = Math.round(Math.max(0, Math.min(1, (value - low) / (high - low))) * 255);
-    }
-    pixels[pixel * 4 + 3] = 255;
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext('2d', { alpha: false })?.putImageData(new ImageData(pixels, width, height), 0, 0);
-  return canvas.toDataURL('image/jpeg', 0.9);
-}
-
 function EvidenceOverlay({ item }: { item: EvidenceItem }) {
   if (item.type !== 'box' || item.coordinate_space !== 'normalized') return null;
   const { x, y, width, height } = item.geometry;
@@ -196,22 +143,24 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [task, setTask] = useState<Task>('single_vqa');
   const [query, setQuery] = useState('Which land-cover features are visible in this scene?');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [altitude, setAltitude] = useState('');
+  const [sensor, setSensor] = useState('');
   const [availableTasks, setAvailableTasks] = useState<Task[]>([
     'single_vqa',
     'caption',
     'grounding',
   ]);
   const [systemState, setSystemState] = useState<'checking' | 'ready' | 'sleeping'>('checking');
-  const [executionMode, setExecutionMode] = useState<'python' | 'edge' | 'unavailable'>('unavailable');
   const [asset, setAsset] = useState<AssetRecord | null>(null);
-  const [previewDataUrl, setPreviewDataUrl] = useState('');
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'working' | 'succeeded' | 'failed'>('idle');
   const [error, setError] = useState('');
 
   const busy = phase === 'uploading' || phase === 'working';
   const result = analysis?.result;
-  const previewSource = previewDataUrl || (asset ? `/api/satquery/assets/${asset.id}/preview` : '');
+  const previewSource = asset ? `/api/satquery/assets/${asset.id}/preview` : '';
   const selectedOption = taskOptions.find((option) => option.value === task)!;
   const progress = phase === 'uploading' ? 0.04 : analysis?.progress ?? 0;
   const uncalibrated = result?.confidence.calibration_version.includes('uncalibrated');
@@ -256,20 +205,10 @@ export default function Home() {
         ]);
         if (!active) return;
         setAvailableTasks(capabilities.tasks);
-        setExecutionMode('python');
         setSystemState('ready');
       } catch {
-        try {
-          const direct = await jsonRequest<{ tasks: Task[] }>('/api/satquery/direct');
-          if (!active) return;
-          setAvailableTasks(direct.tasks);
-          setExecutionMode('edge');
-          setSystemState('ready');
-        } catch {
-          if (!active) return;
-          setExecutionMode('unavailable');
-          setSystemState('sleeping');
-        }
+        if (!active) return;
+        setSystemState('sleeping');
       }
     }
     void checkSystems();
@@ -282,7 +221,6 @@ export default function Home() {
     const selected = event.target.files?.[0] ?? null;
     setError('');
     setAsset(null);
-    setPreviewDataUrl('');
     setAnalysis(null);
     setPhase('idle');
     if (!selected) {
@@ -297,7 +235,7 @@ export default function Home() {
     }
     if (selected.size > 50 * 1024 * 1024) {
       setFile(null);
-      setError('The free public demo accepts files up to 50 MB. Tile or crop this raster first.');
+      setError('The local profile accepts files up to 50 MB. Tile or crop this raster first.');
       event.target.value = '';
       return;
     }
@@ -314,52 +252,32 @@ export default function Home() {
       setError('Write a specific question before running the analysis.');
       return;
     }
+    const hasPartialLocation = [latitude, longitude, altitude].some((value) => value.trim());
+    if (hasPartialLocation && (!latitude.trim() || !longitude.trim())) {
+      setError('Latitude and longitude must be supplied together. Altitude is optional.');
+      return;
+    }
+    const latitudeNumber = latitude.trim() ? Number(latitude) : null;
+    const longitudeNumber = longitude.trim() ? Number(longitude) : null;
+    const altitudeNumber = altitude.trim() ? Number(altitude) : null;
+    if (latitudeNumber !== null && (!Number.isFinite(latitudeNumber) || latitudeNumber < -90 || latitudeNumber > 90)) {
+      setError('Latitude must be a number between -90 and 90.');
+      return;
+    }
+    if (longitudeNumber !== null && (!Number.isFinite(longitudeNumber) || longitudeNumber < -180 || longitudeNumber > 180)) {
+      setError('Longitude must be a number between -180 and 180.');
+      return;
+    }
+    if (altitudeNumber !== null && (!Number.isFinite(altitudeNumber) || altitudeNumber < -500 || altitudeNumber > 100000)) {
+      setError('Altitude must be between -500 and 100000 metres.');
+      return;
+    }
 
     setError('');
     setAnalysis(null);
     setAsset(null);
     setPhase('uploading');
     try {
-      if (executionMode !== 'python') {
-        const preview = await geotiffPreview(file);
-        const edgeAsset = { id: `edge_${crypto.randomUUID().replaceAll('-', '')}`, original_name: file.name, size_bytes: file.size };
-        setPreviewDataUrl(preview);
-        setAsset(edgeAsset);
-        setPhase('working');
-        const output = await jsonRequest<SpaceResult>('/api/satquery/direct', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ image_base64: preview, task, question: query.trim(), max_new_tokens: 128 }),
-        });
-        const evidence = (output.evidence ?? []).map((item) => ({ ...item, id: crypto.randomUUID() }));
-        const completed: AnalysisRecord = {
-          id: `edge_${crypto.randomUUID().replaceAll('-', '')}`,
-          status: 'succeeded',
-          progress: 1,
-          result: {
-            answer: output.text,
-            facts: output.facts ?? [],
-            evidence,
-            confidence: {
-              score: Math.max(0, Math.min(1, output.raw_score ?? 0.5)),
-              level: 'low',
-              calibration_version: output.score_kind === 'calibrated_probability' ? 'specialist-calibration-v1' : 'uncalibrated-evidence-quality',
-              meaning: 'Evidence-quality score only; this model has no calibrated probability of correctness.',
-            },
-            trace: [{
-              step_id: 'edge-inference', task, tool: 'sites-edge-to-zerogpu', status: 'succeeded',
-              model_version: output.model_version, policy_reason: 'Released single-image task routed to the pinned public Space.',
-              duration_ms: output.latency_seconds ? Math.round(output.latency_seconds * 1000) : undefined,
-            }],
-            warnings: output.warnings ?? [],
-            provenance: { execution_mode: 'sites-edge', source_name: file.name },
-          },
-        };
-        setAnalysis(completed);
-        setPhase('succeeded');
-        return;
-      }
-
       const form = new FormData();
       form.append('file', file);
       form.append('modality', 'optical');
@@ -378,6 +296,14 @@ export default function Home() {
           query: query.trim(),
           asset_ids: [uploaded.id],
           requested_tasks: [task],
+          context: latitudeNumber !== null && longitudeNumber !== null ? {
+            latitude: latitudeNumber,
+            longitude: longitudeNumber,
+            altitude_m: altitudeNumber,
+            sensor: sensor.trim() || null,
+            source: 'user',
+            metadata: {},
+          } : null,
           parameters: {},
         }),
       });
@@ -387,7 +313,7 @@ export default function Home() {
       let current = created;
       while (!['succeeded', 'failed', 'cancelled'].includes(current.status)) {
         if (Date.now() >= deadline) {
-          throw new Error('The free model queue exceeded ten minutes. Retry when ZeroGPU is available.');
+          throw new Error('The model exceeded the ten-minute local job limit. Check the model-service terminal.');
         }
         await delay(1200);
         current = await jsonRequest<AnalysisRecord>(`/api/satquery/analyses/${created.id}`);
@@ -407,48 +333,8 @@ export default function Home() {
     setFile(null);
     setAsset(null);
     setAnalysis(null);
-    setPreviewDataUrl('');
     setPhase('idle');
     if (inputRef.current) inputRef.current.value = '';
-  }
-
-  async function downloadMarkedImage() {
-    if (!previewSource || !result) return;
-    const source = new window.Image();
-    source.decoding = 'async';
-    source.src = previewSource;
-    await new Promise<void>((resolve, reject) => {
-      source.onload = () => resolve();
-      source.onerror = () => reject(new Error('Could not load the preview for export.'));
-    });
-    const canvas = document.createElement('canvas');
-    canvas.width = source.naturalWidth;
-    canvas.height = source.naturalHeight;
-    const context = canvas.getContext('2d');
-    if (!context) return;
-    context.drawImage(source, 0, 0);
-    context.lineWidth = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) / 180));
-    context.font = `${Math.max(12, Math.round(Math.min(canvas.width, canvas.height) / 32))}px sans-serif`;
-    for (const item of result.evidence) {
-      if (item.type !== 'box' || item.coordinate_space !== 'normalized') continue;
-      const { x, y, width, height } = item.geometry;
-      context.strokeStyle = '#6dffc5';
-      context.fillStyle = '#09161e';
-      context.strokeRect(x * canvas.width, y * canvas.height, width * canvas.width, height * canvas.height);
-      const metrics = context.measureText(item.label);
-      const labelY = Math.max(20, y * canvas.height);
-      context.fillRect(x * canvas.width, labelY - 20, metrics.width + 12, 22);
-      context.fillStyle = '#6dffc5';
-      context.fillText(item.label, x * canvas.width + 6, labelY - 4);
-    }
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `satquery-${analysis?.id ?? 'analysis'}-overlay.jpg`;
-    link.click();
-    URL.revokeObjectURL(url);
   }
 
   return (
@@ -470,12 +356,12 @@ export default function Home() {
           <span className={`live-pill ${systemState}`}>
             {systemState === 'checking' ? <LoaderCircle size={13} /> : <RadioTower size={13} />}
             {systemState === 'ready'
-              ? 'Free stack ready'
+              ? 'Local controller ready'
               : systemState === 'checking'
                 ? 'Checking systems'
-                : 'Space may be sleeping'}
+                : 'Local services offline'}
           </span>
-          <span className="zero-cost-badge">₹0 infra</span>
+          <span className="zero-cost-badge">Local-first · ₹0</span>
         </div>
       </header>
 
@@ -504,9 +390,9 @@ export default function Home() {
             <div className="query-card-head">
               <div>
                 <span className="step-number">01</span>
-                <div><h2 id="query-title">Build your evidence set</h2><p>GeoTIFF only in the public demo · 50 MB maximum.</p></div>
+                <div><h2 id="query-title">Build your evidence set</h2><p>GeoTIFF on this machine · 50 MB maximum.</p></div>
               </div>
-              <span className="secure-label">Immutable upload · ephemeral host</span>
+              <span className="secure-label">Immutable upload · local workspace</span>
             </div>
 
             <input ref={inputRef} className="sr-only" type="file" accept=".tif,.tiff,image/tiff" onChange={chooseFile} />
@@ -533,6 +419,15 @@ export default function Home() {
               </select>
               <span>{selectedOption.note}</span>
             </div>
+
+            <fieldset className="location-context">
+              <legend>Location context <span>optional but recommended</span></legend>
+              <label>Latitude<input inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.target.value)} placeholder="28.6139" disabled={busy} /></label>
+              <label>Longitude<input inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.target.value)} placeholder="77.2090" disabled={busy} /></label>
+              <label>Altitude (m)<input inputMode="decimal" value={altitude} onChange={(event) => setAltitude(event.target.value)} placeholder="216" disabled={busy} /></label>
+              <label>Sensor<input value={sensor} onChange={(event) => setSensor(event.target.value)} placeholder="Sentinel-2 / drone" maxLength={120} disabled={busy} /></label>
+              <p>Stored as user-provided metadata; the model is never allowed to present it as pixel-derived evidence.</p>
+            </fieldset>
 
             <div className="prompt-box">
               <label htmlFor="query">Your investigation</label>
@@ -580,8 +475,8 @@ export default function Home() {
             {result?.warnings.length ? <details className="warning-list"><summary>{result.warnings.length} model warning{result.warnings.length === 1 ? '' : 's'}</summary><ul>{result.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
             {analysis?.status === 'succeeded' && (
               <div className="artifact-links">
-                <button className="report-link" type="button" onClick={downloadMarkedImage}><ArrowDownToLine size={14} /> Download marked image</button>
-                {executionMode === 'python' && result?.report_url && <a className="report-link" href={`/api/satquery/analyses/${analysis.id}/report`}><ArrowDownToLine size={14} /> Download audit report</a>}
+                <a className="report-link" href={`/api/satquery/analyses/${analysis.id}/overlay`}><ArrowDownToLine size={14} /> Download marked image</a>
+                {result?.report_url && <a className="report-link" href={`/api/satquery/analyses/${analysis.id}/report`}><ArrowDownToLine size={14} /> Download audit report</a>}
               </div>
             )}
           </section>

@@ -1,71 +1,131 @@
 # Product requirements document
 
-## Product
+## Product statement
 
-SatQuery AI lets a user upload validated satellite imagery and ask a natural-language question.
-It selects a permitted specialist, shows evidence and uncertainty, exposes the execution trace,
-and produces a report suitable for a hackathon demonstration.
+SatQuery helps an analyst ask a natural-language question about satellite imagery and receive a
+model answer tied to visible evidence, explicit uncertainty, reproducible model provenance, and an
+auditable execution trace. The initial acceptance target is a complete local SIH demonstration,
+not a publicly hosted service.
 
-## Users
+## Users and jobs
 
-- Disaster-response analyst comparing affected regions.
-- Agriculture/water/urban planning analyst exploring a scene.
-- SIH judge verifying that routing, evidence and model provenance are real.
+| User | Primary job | Success signal |
+|---|---|---|
+| Disaster-response analyst | Inspect a scene and locate a visible affected region | Answer plus image-linked evidence and caveat |
+| Agriculture/water/urban analyst | Ask a land-cover question or request a caption | Concise grounded response with provenance |
+| SIH judge | Verify that a real released model ran | Trace shows pinned revision, timing, warnings, artifact |
+| Developer | Run the stack without paid infrastructure | One documented local command or free-GPU bridge |
 
-## Core jobs
+## Problem
 
-1. Ask a question about one optical scene.
-2. Request a factual caption.
-3. Locate a visible feature and receive grounded geometry.
-4. Compare two dates and identify what/where changed.
-5. Fuse co-registered optical and SAR observations.
-6. Inspect the task, model, parameters, timings, warnings and report.
+General chat interfaces can hide which model ran, accept incompatible imagery, invent certainty,
+and return text with no spatial evidence. Remote-sensing workflows also require geospatial input
+validation and separate specialists for single-scene, temporal, and multimodal tasks.
+
+## Scope by release
+
+| Capability | Local MVP | Later release |
+|---|---:|---:|
+| Optical GeoTIFF + latitude/longitude/altitude metadata | Required | Automatic metadata import |
+| Single-image VQA/caption | Required | Improve domain evaluation |
+| Grounding and marked image | Required with honest parsing caveat | Dedicated grounding evaluation/model |
+| Text, facts, warnings, trace, PDF | Required | Rich audit export |
+| Change-VQA | Disabled until gate | Required after training/evaluation |
+| Optical/SAR fusion | Disabled until gate | Required after training/evaluation |
+| Public website/backend hosting | Out of scope | User chooses providers after local acceptance |
+| Paid endpoint | Forbidden for zero-cost phase | Only with separate explicit authorization |
 
 ## Functional requirements
 
-- Accept GeoTIFF/TIFF; allow PNG/JPEG only when explicitly labelled benchmark imagery.
-- Reject empty, oversized, corrupt, excessively large, or incompatible inputs.
-- Route only among the five named task types.
-- Never use the single-image model for change or raw SAR fusion.
-- Preserve source asset identity and evidence coordinate space.
-- Support asynchronous analysis status, cancellation, events, result retrieval and PDF report.
-- Cache identical VLM requests to conserve free GPU quota.
-- Pin model/data revisions and expose model versions in the trace.
-- Keep all tokens and API keys out of the browser bundle and repository.
-
-## UX requirements
-
-- One clear question composer and upload workflow, not a generic admin dashboard.
-- Calm geospatial visual language using frost, glass and topographic/cartographic details.
-- Honest empty/loading/error/quota states.
-- Never display a fake confidence percentage; distinguish calibrated, evidence-quality and
-  uncalibrated scores in plain language.
-- Evidence remains linked to the image; the trace is readable without exposing hidden reasoning.
-- Keyboard operation, visible focus, reduced-motion support, descriptive labels and strong text
-  contrast are required.
+| ID | Requirement | Acceptance |
+|---|---|---|
+| FR-01 | Accept TIFF/GeoTIFF using a streamed byte cap | Oversize/corrupt file fails before inference |
+| FR-02 | Record SHA-256 and raster metadata | Asset response contains immutable identity and metadata |
+| FR-03 | Route only to registered task enums | Prompt cannot choose code, URL, file path, or model |
+| FR-04 | Enforce task/input compatibility | Single image cannot enter change/fusion; raw SAR cannot enter RGB VLM |
+| FR-05 | Run the exact released Qwen base + adapter | Result provenance contains both pinned revisions |
+| FR-06 | Return asynchronous status and terminal errors | UI can poll without blocking and explains failures |
+| FR-07 | Return text plus structured evidence/warnings | Pydantic-valid result; no fake box on parse failure |
+| FR-08 | Produce a downloadable information overlay | Always labels metadata/answer; valid grounding geometry aligns to preview |
+| FR-09 | Produce an audit PDF | Report includes request, result, trace, warnings, provenance |
+| FR-10 | Support complete local startup | Browser → controller → real model query passes |
+| FR-11 | Validate latitude, longitude and optional altitude | Partial or out-of-range coordinates fail before inference |
+| FR-12 | Preserve metadata provenance | Reports label it user-supplied, never pixel-derived |
 
 ## Non-functional requirements
 
-- Zero billed infrastructure in the demo profile.
-- API tests cover upload → analysis → trace → report and the external Space queue contract.
-- Transient remote calls have timeouts, bounded retries and explicit errors.
-- Source uploads are immutable; generated artifacts are kept separate.
-- The free public deployment is documented as quota-limited and ephemeral.
+| Category | Requirement |
+|---|---|
+| Cost | No paid hosting, endpoint, storage, database, or API required for local MVP |
+| Reproducibility | Pin base, adapter, processor, dependency family, and release manifests |
+| Reliability | Bounded timeouts, serialized GPU inference, explicit terminal state |
+| Security | Loopback defaults, narrow proxy allowlist, server-only secrets, strict upload checks |
+| Privacy | Controller state stays local; free-GPU mode explicitly transmits the raster through ngrok |
+| Accessibility | Keyboard access, visible focus, status not color-only, reduced motion, text equivalent for evidence |
+| Honesty | No hidden simulator, fake confidence, fake evidence, or unsupported specialist claim |
+| Maintainability | Frontend/controller/model contracts remain independently testable |
 
-## Release acceptance
+## Primary user flow
 
-- Qwen adapter release gate passes fresh reload and checksum validation.
-- Evaluation-only notebook writes task-specific metrics on a pinned split.
-- Change artifact reports answer accuracy plus mask IoU/Dice using real SECOND labels.
-- Fusion artifact reports fused, S2-only and S1-only macro-F1/AP ablations.
-- Backend and Space helper tests pass; frontend build passes.
-- End-to-end public smoke test succeeds without any paid hardware selection.
-- Security scan finds no token in source, notebook output or frontend bundle.
+```mermaid
+journey
+    title Local SatQuery analysis
+    section Prepare
+      Start the local stack: 3: Developer
+      Confirm model readiness: 4: Developer
+    section Analyze
+      Choose a GeoTIFF: 5: Analyst
+      Add location metadata: 5: Analyst
+      Ask a specific question: 5: Analyst
+      Watch validation and model progress: 4: Analyst
+    section Inspect
+      Read answer and caveats: 5: Analyst
+      Inspect evidence overlay and trace: 5: Analyst, Judge
+      Download marked image and PDF: 4: Analyst, Judge
+```
 
-## Out of scope for the zero-cost hackathon release
+## UX requirements
 
-- Unlimited or SLA-backed traffic.
-- Paid persistent Hugging Face storage.
-- Autonomous use for emergency or legal decisions.
-- Claims of accuracy on Indian Cartosat/RISAT imagery before an Indian-domain evaluation set exists.
+- The first viewport exposes upload, task, question, and run action; it is not a marketing hero.
+- The evidence canvas and answer are the visual anchors.
+- Status copy reflects real backend phases and model availability.
+- Local/offline errors say which local process is missing.
+- Unsupported tasks are visibly disabled, not silently routed elsewhere.
+- Confidence language distinguishes uncalibrated evidence quality from correctness probability.
+- The UI retains a calm cartographic frost/liquid-glass identity without generic AI-chat styling.
 
+## Acceptance criteria
+
+```mermaid
+flowchart LR
+    A[Static checks pass] --> B[Unit/integration tests pass]
+    B --> C[Model loads exact revisions]
+    C --> D[Upload succeeds]
+    D --> E[Location context validates]
+    E --> F[Real query returns non-empty text]
+    F --> G[Trace and provenance match]
+    G --> H[Preview/report/overlay endpoints work]
+    H --> I[Local MVP accepted]
+```
+
+The MVP is not complete merely because the frontend builds or a model repository exists. It is
+complete only after a real browser/backend/model round trip passes on an accepted execution
+profile.
+
+## Risks and mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| 4 GB laptop VRAM OOM | Local model cannot start | Bounded NF4 profile; temporary free-GPU bridge |
+| Free notebook session expires | Inference stops | Explicit readiness/error; restart and update URL |
+| Adapter domain mismatch | Incorrect Indian-domain answer | Clear warning, Indian validation set before claims |
+| Weak grounding behavior | Missing/incorrect box | Parse validation, no fake box, localization metric gate |
+| Unsupported task demo pressure | Misleading result | Capability gate and specialist isolation |
+| Exposed credential | Account compromise | Revoke pasted token; local public-model path needs no token |
+
+## Out of scope
+
+- Emergency, legal, financial, or safety-critical autonomous decisions.
+- Claims of Cartosat/RISAT performance without an Indian-domain evaluation set.
+- Unlimited traffic, uptime SLA, multi-user isolation, or public data retention.
+- Automatic deployment or paid-resource provisioning.

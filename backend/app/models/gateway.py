@@ -22,6 +22,7 @@ from app.errors import ModelUnavailableError
 from app.schemas import (
     AssetRecord,
     EvidenceItem,
+    GeospatialContext,
     PlannedStep,
     SpecialistOutput,
     TaskType,
@@ -35,6 +36,7 @@ class SpecialistGateway(Protocol):
         step: PlannedStep,
         assets: list[AssetRecord],
         query: str,
+        context: GeospatialContext | None = None,
     ) -> SpecialistOutput: ...
 
     async def health(self) -> bool: ...
@@ -58,6 +60,7 @@ class DemoSpecialistGateway:
         step: PlannedStep,
         assets: list[AssetRecord],
         query: str,
+        context: GeospatialContext | None = None,
     ) -> SpecialistOutput:
         digest = hashlib.sha256(
             f"{step.task.value}:{query}:{':'.join(a.sha256 for a in assets)}".encode()
@@ -104,7 +107,23 @@ class DemoSpecialistGateway:
         return SpecialistOutput(
             task=step.task,
             text=answers[step.task],
-            facts=[{"name": "execution_mode", "value": "simulated"}],
+            facts=[
+                {"name": "execution_mode", "value": "simulated"},
+                *(
+                    [
+                        {
+                            "name": "user_location",
+                            "value": {
+                                "latitude": context.latitude,
+                                "longitude": context.longitude,
+                                "altitude_m": context.altitude_m,
+                            },
+                        }
+                    ]
+                    if context
+                    else []
+                ),
+            ],
             evidence=[evidence],
             raw_score=score,
             score_kind="uncalibrated",
@@ -136,9 +155,12 @@ class HttpSpecialistGateway:
             if settings.model_service_token
             else None
         )
+        headers = {"ngrok-skip-browser-warning": "1"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.model_timeout_seconds, connect=10.0),
-            headers={"Authorization": f"Bearer {token}"} if token else {},
+            headers=headers,
             limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
         )
         self._versions: dict[str, str] = {}
@@ -148,6 +170,7 @@ class HttpSpecialistGateway:
         step: PlannedStep,
         assets: list[AssetRecord],
         query: str,
+        context: GeospatialContext | None = None,
     ) -> SpecialistOutput:
         handles = []
         try:
@@ -166,6 +189,7 @@ class HttpSpecialistGateway:
                 "step": step.model_dump(mode="json"),
                 "query": query,
                 "assets": [asset.model_dump(mode="json") for asset in assets],
+                "context": context.model_dump(mode="json") if context else None,
             }
             response = await self.client.post(
                 f"{self.settings.service_url_for_task(step.task.value).rstrip('/')}/v1/infer/{step.task.value}",
@@ -399,6 +423,7 @@ class SpaceSpecialistGateway:
         step: PlannedStep,
         assets: list[AssetRecord],
         query: str,
+        context: GeospatialContext | None = None,
     ) -> SpecialistOutput:
         if step.task not in SPACE_TASKS:
             raise ModelUnavailableError(
@@ -415,7 +440,8 @@ class SpaceSpecialistGateway:
                 details={"task": step.task.value, "assets": len(assets)},
             )
 
-        cache_key = self._cache_key(step, assets, query)
+        context_suffix = context.model_dump_json() if context else ""
+        cache_key = self._cache_key(step, assets, f"{query}\n{context_suffix}")
         cached = await self._cache_get(cache_key)
         if cached is not None:
             return cached
@@ -437,7 +463,12 @@ class SpaceSpecialistGateway:
                     "data": [
                         base64.b64encode(preview).decode("ascii"),
                         step.task.value,
-                        query,
+                        (
+                            f"{query}\nUser-supplied context (not pixel-derived): "
+                            f"{context.model_dump_json()}"
+                            if context
+                            else query
+                        ),
                         self.settings.space_max_new_tokens,
                     ]
                 },

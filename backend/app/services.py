@@ -178,6 +178,7 @@ class AnalysisService:
                             step,
                             task_assets[step.step_id],
                             record.request.query,
+                            record.request.context,
                         ),
                         timeout=self.settings.model_timeout_seconds,
                     )
@@ -229,6 +230,11 @@ class AnalysisService:
                         "model_versions": {
                             output.task.value: output.model_version for output in outputs
                         },
+                        "user_context": (
+                            record.request.context.model_dump(mode="json")
+                            if record.request.context
+                            else None
+                        ),
                     },
                 )
                 record = record.model_copy(update={"result": result, "updated_at": utc_now()})

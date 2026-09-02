@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -76,16 +77,22 @@ class QwenAdapter:
         self.runtime = QwenVLRuntime(
             settings.base_model,
             revision=settings.base_revision or "",
-            adapter_path=settings.adapter_dir,
+            adapter_path=settings.adapter_dir or settings.adapter_model,
+            adapter_revision=None if settings.adapter_dir else settings.adapter_revision,
+            processor_id=settings.adapter_dir or settings.adapter_model,
+            processor_revision=None if settings.adapter_dir else settings.adapter_revision,
             four_bit=settings.four_bit,
+            max_pixels=settings.max_pixels,
+            device=settings.device,
         )
-        adapter_digest = "base"
-        if settings.adapter_dir:
-            adapter_digest = _manifest_version(settings.adapter_dir)
-        self.version = (
-            f"{settings.base_model}@{settings.base_revision}+{adapter_digest}"
+        adapter_version = (
+            _manifest_version(settings.adapter_dir)
+            if settings.adapter_dir
+            else f"{settings.adapter_model}@{settings.adapter_revision}"
         )
+        self.version = f"{settings.base_model}@{settings.base_revision}+{adapter_version}"
         self.max_new_tokens = settings.max_new_tokens
+        self.max_image_edge = settings.max_image_edge
 
     def infer(self, payload: InferencePayload, paths: list[Path]) -> SpecialistResponse:
         from satquery_ml.preprocessing import geotiff_to_rgb_preview
@@ -97,20 +104,28 @@ class QwenAdapter:
         preview = paths[0].with_suffix(".preview.png")
         count = int((payload.assets[0].metadata or {}).get("count", 3))
         rgb_bands = (4, 3, 2) if count >= 4 else (1, 2, 3)
-        geotiff_to_rgb_preview(paths[0], preview, rgb_bands=rgb_bands, max_size=1024)
+        geotiff_to_rgb_preview(
+            paths[0], preview, rgb_bands=rgb_bands, max_size=self.max_image_edge
+        )
+        context_note = ""
+        if payload.context:
+            context_note = (
+                " User-supplied context (do not claim it was inferred from pixels): "
+                + payload.context.model_dump_json()
+            )
         prompts = {
             "single_vqa": (
                 "Answer the remote-sensing question from the image only. State uncertainty and "
-                f"do not invent sensor facts. Question: {payload.query}"
+                f"do not invent sensor facts. Question: {payload.query}{context_note}"
             ),
             "caption": (
                 "Describe the land cover, visible objects, spatial relationships, and uncertainty "
-                "in this remote-sensing image. Do not infer raw SAR or hidden bands."
+                f"in this remote-sensing image. Do not infer raw SAR or hidden bands.{context_note}"
             ),
             "grounding": (
                 "Locate the requested feature and return only JSON with keys label and bbox_2d. "
                 "bbox_2d must be [x1,y1,x2,y2] in relative coordinates from 0 to 1000. "
-                f"Request: {payload.query}"
+                f"Request: {payload.query}{context_note}"
             ),
         }
         response = self.runtime.generate(
@@ -123,8 +138,8 @@ class QwenAdapter:
         warnings = [
             "Open-ended VLM output is not probability-calibrated; raw_score is evidence quality."
         ]
-        if payload.step.task == "grounding" and response.parsed:
-            box = response.parsed.get("bbox_2d")
+        if payload.step.task == "grounding":
+            box = _grounding_box(response.text, response.parsed)
             if (
                 isinstance(box, list)
                 and len(box) == 4
@@ -157,13 +172,47 @@ class QwenAdapter:
         return SpecialistResponse(
             task=payload.step.task,
             text=response.text,
-            facts=[],
+            facts=(
+                [
+                    {
+                        "name": "user_location",
+                        "value": {
+                            "latitude": payload.context.latitude,
+                            "longitude": payload.context.longitude,
+                            "altitude_m": payload.context.altitude_m,
+                        },
+                    }
+                ]
+                if payload.context
+                else []
+            ),
             evidence=evidence,
             raw_score=0.5,
             score_kind="evidence_quality",
             model_version=self.version,
             warnings=warnings,
         )
+
+
+_TAGGED_BOX = re.compile(
+    r"<box>\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*,"
+    r"\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*</box>",
+    re.IGNORECASE,
+)
+
+
+def _grounding_box(text: str, parsed: dict[str, object] | None) -> list[float] | None:
+    """Accept the JSON and tagged-box formats used by Qwen-VL checkpoints."""
+
+    if parsed:
+        candidate = parsed.get("bbox_2d") or parsed.get("bbox") or parsed.get("box")
+        if isinstance(candidate, list) and len(candidate) == 4:
+            try:
+                return [float(item) for item in candidate]
+            except (TypeError, ValueError):
+                pass
+    match = _TAGGED_BOX.search(text)
+    return [float(item) for item in match.groups()] if match else None
 
 
 class ChangeAdapter:

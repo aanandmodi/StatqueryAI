@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from app.config import Settings
 from app.errors import NotFoundError, ValidationFailure
@@ -169,8 +169,14 @@ async def preview_asset(asset_id: str, request: Request) -> Response:
     )
 
 
-def _draw_overlay(preview: bytes, evidence: list[Any]) -> bytes:
-    """Burn normalized model boxes into a downloadable JPEG artifact."""
+def _draw_overlay(
+    preview: bytes,
+    evidence: list[Any],
+    *,
+    context: Any | None = None,
+    answer: str = "",
+) -> bytes:
+    """Burn validated boxes plus labelled metadata/answer into a JPEG artifact."""
 
     with Image.open(io.BytesIO(preview)) as source:
         image = source.convert("RGB")
@@ -207,6 +213,42 @@ def _draw_overlay(preview: bytes, evidence: list[Any]) -> bytes:
             fill=(9, 22, 30),
         )
         draw.text((box[0] + 5, label_top + 3), label, fill=color)
+
+    font_size = max(12, round(min(image.size) / 55))
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+    except OSError:
+        font = ImageFont.load_default()
+    lines: list[str] = []
+    if context is not None:
+        altitude = (
+            f"{context.altitude_m:g} m"
+            if context.altitude_m is not None
+            else "not supplied"
+        )
+        lines.append(
+            "USER METADATA · "
+            f"lat {context.latitude:.6f} · lon {context.longitude:.6f} · alt {altitude}"
+        )
+    clean_answer = " ".join(answer.split())
+    if clean_answer:
+        max_chars = max(36, round(image.width / max(font_size * 0.56, 1)))
+        while clean_answer and len(lines) < 3:
+            prefix = "MODEL · " if not any(line.startswith("MODEL · ") for line in lines) else ""
+            lines.append(prefix + clean_answer[:max_chars])
+            clean_answer = clean_answer[max_chars:]
+    if lines:
+        line_height = font_size + 6
+        panel_height = line_height * len(lines) + 14
+        top = max(0, image.height - panel_height)
+        draw.rectangle((0, top, image.width, image.height), fill=(9, 22, 30))
+        for index, line in enumerate(lines):
+            draw.text(
+                (12, top + 7 + index * line_height),
+                line,
+                fill=(225, 247, 242),
+                font=font,
+            )
 
     output = io.BytesIO()
     image.save(output, format="JPEG", quality=92, optimize=True)
@@ -285,7 +327,13 @@ async def download_overlay(analysis_id: str, request: Request) -> Response:
         max_edge=state.settings.space_preview_max_edge,
         jpeg_quality=state.settings.space_preview_jpeg_quality,
     )
-    overlay = await asyncio.to_thread(_draw_overlay, preview, record.result.evidence)
+    overlay = await asyncio.to_thread(
+        _draw_overlay,
+        preview,
+        record.result.evidence,
+        context=record.request.context,
+        answer=record.result.answer,
+    )
     return Response(
         content=overlay,
         media_type="image/jpeg",

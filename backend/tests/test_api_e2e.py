@@ -65,7 +65,17 @@ def test_upload_analyse_trace_and_report(tmp_path: Path):
         created = client.post(
             "/v1/analyses",
             headers={"Idempotency-Key": "test-analysis-0001"},
-            json={"query": "What is visible in this scene?", "asset_ids": [asset_id]},
+            json={
+                "query": "What is visible in this scene?",
+                "asset_ids": [asset_id],
+                "context": {
+                    "latitude": 28.6139,
+                    "longitude": 77.209,
+                    "altitude_m": 216,
+                    "source": "user",
+                    "metadata": {"mission": "SIH test"},
+                },
+            },
         )
         assert created.status_code == 202, created.text
         analysis_id = created.json()["id"]
@@ -85,6 +95,10 @@ def test_upload_analyse_trace_and_report(tmp_path: Path):
         assert record["status"] == "succeeded", record
         assert record["result"]["confidence"]["calibration_version"] == "demo-uncalibrated"
         assert "SIMULATED OUTPUT" in record["result"]["warnings"][0]
+        assert record["result"]["provenance"]["user_context"]["latitude"] == 28.6139
+        assert any(
+            fact["name"] == "user_location" for fact in record["result"]["facts"]
+        )
         assert {event["task"] for event in record["result"]["trace"]} >= {
             "validation",
             "planning",

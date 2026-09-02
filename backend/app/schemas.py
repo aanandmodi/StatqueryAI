@@ -91,11 +91,41 @@ class AssetRecord(StrictModel):
         return not self.validation_errors and self.metadata is not None
 
 
+class GeospatialContext(StrictModel):
+    """User-supplied location context kept separate from pixel-derived evidence."""
+
+    latitude: Annotated[float, Field(ge=-90, le=90)]
+    longitude: Annotated[float, Field(ge=-180, le=180)]
+    altitude_m: Annotated[float | None, Field(ge=-500, le=100_000)] = None
+    captured_at: datetime | None = None
+    sensor: Annotated[str | None, Field(max_length=120)] = None
+    source: Literal["user", "gps", "exif", "raster"] = "user"
+    metadata: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def bound_metadata(
+        cls, value: dict[str, str | int | float | bool]
+    ) -> dict[str, str | int | float | bool]:
+        if len(value) > 24:
+            raise ValueError("metadata may contain at most 24 entries")
+        cleaned: dict[str, str | int | float | bool] = {}
+        for key, item in value.items():
+            clean_key = str(key).strip()
+            if not clean_key or len(clean_key) > 80:
+                raise ValueError("metadata keys must contain 1 to 80 characters")
+            if isinstance(item, str) and len(item) > 500:
+                raise ValueError("metadata string values may contain at most 500 characters")
+            cleaned[clean_key] = item
+        return cleaned
+
+
 class AnalysisCreate(StrictModel):
     query: Annotated[str, Field(min_length=2, max_length=2_000)]
     asset_ids: Annotated[list[str], Field(min_length=1, max_length=4)]
     session_id: Annotated[str | None, Field(max_length=80)] = None
     requested_tasks: Annotated[list[TaskType] | None, Field(max_length=4)] = None
+    context: GeospatialContext | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("asset_ids")

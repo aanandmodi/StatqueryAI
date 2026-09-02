@@ -1,47 +1,39 @@
-# Zero-cost operations runbook
+# Zero-cost execution runbook
 
-## Non-negotiable cost controls
+## Zero cost is not unlimited hosting
 
-- Never enable `provision_paid_endpoint` in any notebook.
-- `request_space_hardware` may only request the explicit free `zero-a10g` flavor.
-- The model Space must read **ZeroGPU**. The public API is a Sites edge route and must not provision
-  a second service.
-- Do not add paid persistent storage.
-- Stop Kaggle/Colab immediately after a final PASS cell and save/download artifacts first.
-- Keep training, evaluation, change and fusion in separate sessions.
+| Option | Compute lifetime | Public endpoint | Main limit |
+|---|---|---:|---|
+| Laptop 4-bit | While local process runs | No | 4 GiB VRAM / 7.7 GiB RAM |
+| Kaggle/Colab free GPU | While notebook session runs | Temporary ngrok HTTPS URL | Session/quota/idle limits |
+| Hugging Face ZeroGPU | While eligible Space runs | Stable Space URL | Account eligibility and daily GPU quota |
+| HF model repository | Durable file hosting | Download URL only | No compute |
+| HF Inference Providers | Provider-managed | API | Model support, free credit, and possible billing |
 
-## Daily demo preparation
+There is no honest way to guarantee a permanent, unlimited, production-grade custom VLM endpoint
+at zero cost. The project therefore uses explicit finite profiles and fails safely when compute is
+absent.
 
-1. Open the model Space early enough for cold start/build completion.
-2. Check the Site's `/api/satquery/direct` readiness route.
-3. Run one small cached single-image query.
-4. Keep one known-good RGB/GeoTIFF demo asset locally; do not depend on a live dataset download.
-5. Keep screenshots/video of a valid run only as presentation backup, clearly labelled recorded.
+## Recommended SIH demo profile
 
-## Expected free-tier failures
+Use the local frontend and controller. Prefer laptop 4-bit only after its real smoke passes;
+otherwise use the temporary Kaggle/Colab model notebook. Cache one tested demo input/result for
+rehearsal evidence, but never present cached output as a new inference.
 
-| Symptom | Meaning | Action |
-|---|---|---|
-| Space sleeping/building | Normal cold start | Wait and retry readiness |
-| 429 / quota message | Daily/shared ZeroGPU quota | Stop retries; use cached result or wait for reset |
-| API 503 model unavailable | Remote queue, build or specialist absent | Read `details.reason`; do not switch to demo output |
-| Lost upload/job after restart | Ephemeral Space filesystem | Re-upload; users retain originals |
-| Long queue | Shared GPU contention | Use the bounded demo image/query; avoid parallel requests |
+## Quota and failure handling
 
-## Kaggle stop points
+| Event | Required response |
+|---|---|
+| ngrok URL expires/changes | Mark model unavailable; rerun cells 8–10 and update backend URL |
+| ZeroGPU quota exhausted | Return `503`; wait for reset; no paid fallback |
+| Laptop CUDA OOM | Stop model process, clear other GPU usage, retry once, then use notebook |
+| Provider asks for payment method | Stop; do not provision |
+| Token limit/rate limit | Reduce generation cap or authenticate within free allowance; do not claim unlimited use |
 
-- Qwen training: stop only after section 9 prints the complete PASS dictionary.
-- Evaluation: stop after section 7 writes predictions/summary and prints PASS.
-- Change: stop after section 5 hashes weights/config and prints PASS.
-- Fusion: stop after section 5 records all three ablations and prints PASS.
+## Cost guardrails
 
-Close the browser tab only after selecting **Save Version** and stopping the session from Kaggle's
-session control. Closing a tab alone does not reliably terminate a cloud GPU.
-
-## Before presenting
-
-- Confirm no secrets appear in notebook outputs or browser developer tools.
-- Confirm the UI says `uncalibrated` when appropriate.
-- Explain the European Sentinel → Indian Cartosat/RISAT domain gap.
-- Demonstrate the execution trace and a rejected incompatible request.
-- Have the current quota/cold-start limitation ready as an honest engineering trade-off.
+- Persistent deployment helpers have been removed from the repository.
+- Dedicated Inference Endpoints are never created automatically.
+- No cloud resource is selected because it is merely described as a trial.
+- A future provider must support a hard zero-spend or explicit spend cap before use.
+- Account tokens are stored only in provider secret stores or server environments.

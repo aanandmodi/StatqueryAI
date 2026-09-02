@@ -8,15 +8,21 @@ version = "0.1.0"
 description = "Long-lived GPU inference service for SatQuery specialists"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+  "accelerate>=1.7,<2",
+  "bitsandbytes>=0.47,<1",
   "fastapi>=0.115,<1",
+  "huggingface-hub>=0.34,<1",
   "numpy>=2,<3",
+  "peft>=0.17,<1",
+  "pillow>=11,<13",
   "pydantic-settings>=2.7,<3",
   "python-multipart>=0.0.20,<1",
+  "qwen-vl-utils>=0.0.14,<1",
   "safetensors>=0.5,<1",
   "torch>=2.6,<3",
+  "transformers>=4.57,<5",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["satquery_model_service"]
-

@@ -67,6 +67,25 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
         Paragraph(f"Created: {record.created_at.isoformat()}", styles["SatBody"]),
         Paragraph("Query", styles["SatHeading"]),
         Paragraph(_escape(record.request.query), styles["SatBody"]),
+        *(
+            [
+                Paragraph("User-supplied location context", styles["SatHeading"]),
+                Paragraph(
+                    _escape(
+                        f"Latitude {record.request.context.latitude}, longitude "
+                        f"{record.request.context.longitude}, altitude "
+                        + (
+                            f"{record.request.context.altitude_m} m"
+                            if record.request.context.altitude_m is not None
+                            else "not supplied"
+                        )
+                    ),
+                    styles["SatBody"],
+                ),
+            ]
+            if record.request.context
+            else []
+        ),
         Paragraph("Answer", styles["SatHeading"]),
         Paragraph(_escape(result.answer), styles["SatBody"]),
         Paragraph("Confidence", styles["SatHeading"]),

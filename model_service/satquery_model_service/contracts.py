@@ -33,10 +33,21 @@ class Asset(StrictModel):
     validation_errors: list[str] = Field(default_factory=list)
 
 
+class GeospatialContext(StrictModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    altitude_m: float | None = Field(default=None, ge=-500, le=100_000)
+    captured_at: str | None = None
+    sensor: str | None = Field(default=None, max_length=120)
+    source: Literal["user", "gps", "exif", "raster"] = "user"
+    metadata: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
 class InferencePayload(StrictModel):
     step: Step
     query: str = Field(min_length=2, max_length=2_000)
     assets: list[Asset] = Field(min_length=1, max_length=2)
+    context: GeospatialContext | None = None
 
 
 class Evidence(StrictModel):

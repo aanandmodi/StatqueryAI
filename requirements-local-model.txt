@@ -1,0 +1,12 @@
+# Reproducible local Qwen3-VL inference stack. Install through scripts/setup-local.ps1.
+# These versions match the adapter's tested Transformers/PEFT generation path.
+accelerate==1.7.0
+bitsandbytes==0.50.2
+huggingface-hub==0.34.4
+peft==0.17.1
+qwen-vl-utils==0.0.14
+transformers==4.57.1
+
+-e ./ml
+-e ./model_service
+-e ./backend[dev]

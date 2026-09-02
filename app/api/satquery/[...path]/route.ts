@@ -1,5 +1,3 @@
-import { env } from 'cloudflare:workers';
-
 type RouteContext = { params: Promise<{ path: string[] }> };
 type Method = 'GET' | 'POST';
 
@@ -15,10 +13,6 @@ const READ_PATHS = [
 const WRITE_PATHS = [/^assets$/, /^analyses$/];
 
 function binding(name: string): string {
-  const runtimeValue = (env as unknown as Record<string, unknown>)[name];
-  if (typeof runtimeValue === 'string' && runtimeValue.trim()) {
-    return runtimeValue.trim();
-  }
   return process.env[name]?.trim() ?? '';
 }
 
@@ -81,7 +75,7 @@ async function proxy(request: Request, context: RouteContext, method: Method) {
       {
         error: {
           code: 'backend_unreachable',
-          message: 'The free API Space is sleeping or unavailable. Wake it and retry shortly.',
+          message: 'The local SatQuery backend is not reachable. Start it on http://127.0.0.1:8000.',
         },
       },
       { status: 503 },

@@ -21,7 +21,8 @@ generic AI chat template or a collection of glowing dashboard cards.
   dimensions, bands, CRS and validation state.
 - Pair tasks make time A/time B or optical/SAR roles unmistakable.
 - Evidence boxes/polygons use class-specific color, clear focus states and a linked legend.
-- Loading shows actual phases: validating, planning, queued for ZeroGPU, running, integrating.
+- Location context presents bounded latitude, longitude, altitude and sensor fields with provenance copy.
+- Loading shows actual phases: validating, planning, waiting on Kaggle GPU, running, integrating.
 - Quota/cold-start errors give a retry path and never imply the analysis completed.
 - Confidence language uses `calibrated probability`, `evidence quality`, or `uncalibrated estimate`.
 - The trace lists tool, task, version, permitted parameters, duration and status.
@@ -48,4 +49,3 @@ generic AI chat template or a collection of glowing dashboard cards.
 - All canvas evidence has a text equivalent in the evidence list.
 - Never communicate task/status using color alone.
 - Touch targets are at least 44 px; error text is actionable and associated with its input.
-
