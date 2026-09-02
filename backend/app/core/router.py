@@ -73,6 +73,13 @@ class PolicyRouter:
             if requested_tasks
             else self._classify(query)
         )
+        if (
+            not requested_tasks
+            and len(assets) == 2
+            and candidates
+            and all(candidate.task == TaskType.SINGLE_VQA for candidate in candidates)
+        ):
+            candidates = [IntentCandidate(self._task_from_pair(assets), query)]
         if not candidates:
             candidates = [IntentCandidate(TaskType.SINGLE_VQA, query)]
 
@@ -115,6 +122,14 @@ class PolicyRouter:
                 },
             )
         return ExecutionPlan(steps=steps, rejected_intents=rejected)
+
+    @staticmethod
+    def _task_from_pair(assets: list[AssetRecord]) -> TaskType:
+        modalities = {asset.modality for asset in assets}
+        has_optical = bool(modalities & {Modality.OPTICAL, Modality.MULTISPECTRAL})
+        if has_optical and Modality.SAR in modalities:
+            return TaskType.OPTICAL_SAR_FUSION
+        return TaskType.CHANGE_VQA
 
     @staticmethod
     def _classify(query: str) -> list[IntentCandidate]:

@@ -38,7 +38,7 @@ sequenceDiagram
     participant W as Web server
     participant A as FastAPI controller
     participant F as Local stores
-    participant M as Model service
+    participant M as Hybrid specialists
     U->>W: GeoTIFF + question + lat/lon/altitude metadata
     W->>A: POST /v1/assets
     A->>F: Stream immutable upload + SHA-256
@@ -47,8 +47,7 @@ sequenceDiagram
     W->>A: POST /v1/analyses
     A->>A: Closed-set plan and compatibility checks
     A->>M: Bearer-authenticated contract + raster + user context
-    M->>M: RGB stretch, 448px bound, prompt policy
-    M->>M: Qwen3-VL + LoRA deterministic generation
+    M->>M: Qwen generation or bounded aligned pair analysis
     M-->>A: Text + facts + optional box + revision + warnings
     A->>A: Validate and integrate result
     A->>F: Persist result, trace, PDF, optional overlay
@@ -62,7 +61,7 @@ sequenceDiagram
 | Step | Rule | Why |
 |---|---|---|
 | Decode | Rasterio for TIFF; PIL fallback only for allowed benchmark imagery | Preserve geospatial validation |
-| RGB bands | Descriptions `red/green/blue` or B04/B03/B02; otherwise first three | Deterministic visual preview |
+| RGB bands | Descriptions `red/green/blue` or B04/B03/B02; 4/3/2 fallback for multispectral; grayscale repeat for fewer than 3 bands | Deterministic optical and SAR preview |
 | Stretch | Per-band 2nd–98th percentile | Make reflectance imagery viewable without altering source |
 | Resize | Long edge ≤ 448 for laptop VLM | Bound visual tokens and VRAM |
 | Prompt | Task-specific instruction + user question | Separate caption/VQA/grounding output contracts |
@@ -95,12 +94,26 @@ primarily trained for remote-sensing VQA; grounding quality must be judged indep
 | Model output | API label | UI behavior |
 |---|---|---|
 | Qwen open-ended answer | `uncalibrated` / evidence quality | No correctness percentage; display warning |
+| CPU pair analytical tools | `evidence_quality` | Candidate fractions/boxes plus explicit proxy warning |
 | Future temperature-calibrated classifier | `calibrated_probability` | Percentage allowed with calibration version |
 | Demo simulator | `simulated` | Visibly marked; forbidden in production mode |
 
 Token likelihood is not treated as the probability that an answer is factually correct.
 
-## Change-VQA pipeline (not released)
+## Change pipeline: runnable baseline and learned upgrade
+
+```mermaid
+flowchart LR
+    A[Time A] --> Align[Bounded common geospatial grid]
+    B[Time B] --> Align
+    Align --> Scale[Joint robust channel scaling]
+    Scale --> Diff[Mean absolute spectral difference]
+    Diff --> Threshold[Bounded/user-permitted threshold]
+    Threshold --> Out[Changed fraction + direction + candidate box]
+```
+
+The runnable CPU tool is deterministic and makes no semantic-class claim. Its evidence-quality
+score is capped below calibrated-confidence display. The learned upgrade path is:
 
 ```mermaid
 flowchart LR
@@ -117,10 +130,14 @@ flowchart LR
     Mask --> Gate2[IoU/Dice gate]
 ```
 
-It must not be exposed until SECOND imagery/labels are attached, leakage-safe evaluation is run,
-and both answer and localization gates pass.
+The learned artifact must not replace the baseline until CDVQA/SECOND imagery and labels are
+attached, leakage-safe evaluation is run, and both answer and localization gates pass.
 
-## Optical/SAR fusion pipeline (not released)
+## Optical/SAR pipeline: runnable baseline and learned upgrade
+
+The runnable baseline aligns SAR onto the optical grid, combines relative backscatter with optical
+luminance/colour/edge cues, and returns explicitly labelled water and built-up **candidate proxies**.
+It supports one- or two-band SAR and never passes raw SAR through Qwen. The learned upgrade path is:
 
 ```mermaid
 flowchart LR
@@ -135,7 +152,8 @@ flowchart LR
     Eval --> Ablate[S2-only and S1-only ablations]
 ```
 
-Raw SAR is never passed to the RGB Qwen specialist.
+The TerraMind artifact may replace the baseline only after prescribed paired evaluation plus
+fused/S2-only/S1-only ablations. Raw SAR is never passed to Qwen as if it were optical colour.
 
 ## Reproducibility and leakage controls
 

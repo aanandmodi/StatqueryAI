@@ -25,6 +25,9 @@ import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from
 import { Button } from '@/components/ui/button';
 
 type Task = 'single_vqa' | 'caption' | 'grounding' | 'change_vqa' | 'optical_sar_fusion';
+type RouteChoice = 'auto' | Task;
+type InputMode = 'single' | 'temporal' | 'fusion';
+type Modality = 'optical' | 'multispectral' | 'sar';
 type AnalysisStatus =
   | 'queued'
   | 'validating'
@@ -85,8 +88,8 @@ const taskOptions: Array<{ value: Task; label: string; note: string }> = [
   { value: 'single_vqa', label: 'Ask one scene', note: 'Qwen3-VL · released' },
   { value: 'caption', label: 'Describe the scene', note: 'Qwen3-VL · released' },
   { value: 'grounding', label: 'Locate a feature', note: 'Qwen3-VL · released' },
-  { value: 'change_vqa', label: 'Compare two dates', note: 'Specialist training gate' },
-  { value: 'optical_sar_fusion', label: 'Fuse optical + SAR', note: 'Specialist training gate' },
+  { value: 'change_vqa', label: 'Compare two dates', note: 'Local analytical baseline · runnable' },
+  { value: 'optical_sar_fusion', label: 'Fuse optical + SAR', note: 'Local analytical baseline · runnable' },
 ];
 
 const statusCopy: Record<AnalysisStatus, string> = {
@@ -140,8 +143,12 @@ function EvidenceOverlay({ item }: { item: EvidenceItem }) {
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const secondInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [task, setTask] = useState<Task>('single_vqa');
+  const [secondFile, setSecondFile] = useState<File | null>(null);
+  const [inputMode, setInputMode] = useState<InputMode>('single');
+  const [modality, setModality] = useState<Modality>('optical');
+  const [route, setRoute] = useState<RouteChoice>('auto');
   const [query, setQuery] = useState('Which land-cover features are visible in this scene?');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
@@ -161,7 +168,14 @@ export default function Home() {
   const busy = phase === 'uploading' || phase === 'working';
   const result = analysis?.result;
   const previewSource = asset ? `/api/satquery/assets/${asset.id}/preview` : '';
-  const selectedOption = taskOptions.find((option) => option.value === task)!;
+  const selectedOption = route === 'auto' ? null : taskOptions.find((option) => option.value === route)!;
+  const requiresPair = inputMode !== 'single';
+  const filesReady = Boolean(file && (!requiresPair || secondFile));
+  const compatibleTasks = inputMode === 'single'
+    ? new Set<Task>(['single_vqa', 'caption', 'grounding'])
+    : inputMode === 'temporal'
+      ? new Set<Task>(['change_vqa'])
+      : new Set<Task>(['optical_sar_fusion']);
   const progress = phase === 'uploading' ? 0.04 : analysis?.progress ?? 0;
   const uncalibrated = result?.confidence.calibration_version.includes('uncalibrated');
   const confidenceLabel = result
@@ -217,35 +231,44 @@ export default function Home() {
     };
   }, []);
 
-  function chooseFile(event: ChangeEvent<HTMLInputElement>) {
+  function chooseFile(event: ChangeEvent<HTMLInputElement>, slot: 'primary' | 'secondary') {
     const selected = event.target.files?.[0] ?? null;
     setError('');
     setAsset(null);
     setAnalysis(null);
     setPhase('idle');
     if (!selected) {
-      setFile(null);
+      if (slot === 'primary') setFile(null);
+      else setSecondFile(null);
       return;
     }
     if (!/\.(tif|tiff)$/i.test(selected.name)) {
-      setFile(null);
+      if (slot === 'primary') setFile(null);
+      else setSecondFile(null);
       setError('Use a georeferenced .tif or .tiff. PNG/JPEG is reserved for named benchmark imports.');
       event.target.value = '';
       return;
     }
     if (selected.size > 50 * 1024 * 1024) {
-      setFile(null);
+      if (slot === 'primary') setFile(null);
+      else setSecondFile(null);
       setError('The local profile accepts files up to 50 MB. Tile or crop this raster first.');
       event.target.value = '';
       return;
     }
-    setFile(selected);
+    if (slot === 'primary') setFile(selected);
+    else setSecondFile(selected);
   }
 
   async function runAnalysis() {
-    if (!file || busy) return;
-    if (!availableTasks.includes(task)) {
-      setError(`${selectedOption.label} is visible in the architecture but its specialist has not passed release yet.`);
+    if (!file || (requiresPair && !secondFile) || busy) return;
+    const expectedTask: Task = inputMode === 'single' ? 'single_vqa' : inputMode === 'temporal' ? 'change_vqa' : 'optical_sar_fusion';
+    if (route !== 'auto' && !compatibleTasks.has(route)) {
+      setError('The selected route is incompatible with this evidence-set configuration.');
+      return;
+    }
+    if (!availableTasks.includes(route === 'auto' ? expectedTask : route)) {
+      setError('The required specialist is not available from the local controller.');
       return;
     }
     if (query.trim().length < 2) {
@@ -278,15 +301,20 @@ export default function Home() {
     setAsset(null);
     setPhase('uploading');
     try {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('modality', 'optical');
-      form.append('role', 'primary');
-      const uploaded = await jsonRequest<AssetRecord>('/api/satquery/assets', {
-        method: 'POST',
-        body: form,
-      });
-      setAsset(uploaded);
+      const upload = async (source: File, uploadModality: Modality, role: string) => {
+        const form = new FormData();
+        form.append('file', source);
+        form.append('modality', uploadModality);
+        form.append('role', role);
+        return jsonRequest<AssetRecord>('/api/satquery/assets', { method: 'POST', body: form });
+      };
+      const primaryRole = inputMode === 'temporal' ? 'time_a' : inputMode === 'fusion' ? 'optical' : 'primary';
+      const uploads = [upload(file, modality, primaryRole)];
+      if (requiresPair && secondFile) {
+        uploads.push(upload(secondFile, inputMode === 'fusion' ? 'sar' : modality, inputMode === 'fusion' ? 'sar' : 'time_b'));
+      }
+      const uploaded = await Promise.all(uploads);
+      setAsset(uploaded[0]);
       setPhase('working');
 
       const created = await jsonRequest<AnalysisRecord>('/api/satquery/analyses', {
@@ -294,8 +322,8 @@ export default function Home() {
         headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
         body: JSON.stringify({
           query: query.trim(),
-          asset_ids: [uploaded.id],
-          requested_tasks: [task],
+          asset_ids: uploaded.map((item) => item.id),
+          requested_tasks: route === 'auto' ? null : [route],
           context: latitudeNumber !== null && longitudeNumber !== null ? {
             latitude: latitudeNumber,
             longitude: longitudeNumber,
@@ -331,10 +359,12 @@ export default function Home() {
 
   function clearFile() {
     setFile(null);
+    setSecondFile(null);
     setAsset(null);
     setAnalysis(null);
     setPhase('idle');
     if (inputRef.current) inputRef.current.value = '';
+    if (secondInputRef.current) secondInputRef.current.value = '';
   }
 
   return (
@@ -395,29 +425,69 @@ export default function Home() {
               <span className="secure-label">Immutable upload · local workspace</span>
             </div>
 
-            <input ref={inputRef} className="sr-only" type="file" accept=".tif,.tiff,image/tiff" onChange={chooseFile} />
-            <div className="upload-grid single-upload">
+            <div className="task-picker evidence-mode-picker">
+              <label htmlFor="input-mode">Evidence set</label>
+              <select id="input-mode" value={inputMode} onChange={(event) => {
+                const nextMode = event.target.value as InputMode;
+                setInputMode(nextMode);
+                setModality(nextMode === 'fusion' ? 'multispectral' : 'optical');
+                setRoute('auto');
+                clearFile();
+              }} disabled={busy}>
+                <option value="single">One optical, multispectral, or SAR scene</option>
+                <option value="temporal">Bi-temporal co-registered pair</option>
+                <option value="fusion">Co-registered optical + SAR pair</option>
+              </select>
+              <span>{inputMode === 'single' ? '1 raster' : '2 aligned rasters'}</span>
+            </div>
+
+            <div className="task-picker modality-picker">
+              <label htmlFor="modality">{inputMode === 'temporal' ? 'Pair modality' : inputMode === 'fusion' ? 'Optical modality' : 'Scene modality'}</label>
+              <select id="modality" value={modality} onChange={(event) => setModality(event.target.value as Modality)} disabled={busy}>
+                {inputMode !== 'fusion' && <option value="optical">Optical</option>}
+                <option value="multispectral">Multispectral</option>
+                {inputMode !== 'fusion' && <option value="sar">SAR</option>}
+                {inputMode === 'fusion' && <option value="optical">Optical RGB</option>}
+              </select>
+              <span>Declared, never guessed</span>
+            </div>
+
+            <input ref={inputRef} className="sr-only" type="file" accept=".tif,.tiff,image/tiff" onChange={(event) => chooseFile(event, 'primary')} />
+            <input ref={secondInputRef} className="sr-only" type="file" accept=".tif,.tiff,image/tiff" onChange={(event) => chooseFile(event, 'secondary')} />
+            <div className={`upload-grid ${requiresPair ? '' : 'single-upload'}`}>
               <button className={`upload-tile ${file ? 'filled' : ''}`} type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
                 <span className={`file-icon ${file ? 'optical' : ''}`}>{file ? <FileImage /> : <UploadCloud />}</span>
                 <span className="upload-copy">
-                  <strong>{file ? file.name : 'Choose an optical scene'}</strong>
+                  <strong>{file ? file.name : inputMode === 'temporal' ? 'Choose time A / before' : inputMode === 'fusion' ? 'Choose optical scene' : 'Choose source scene'}</strong>
                   <small>{file ? `${formatBytes(file.size)} · ready for validation` : 'Georeferenced TIFF / GeoTIFF'}</small>
                 </span>
                 {file ? <span className="verified">Selected</span> : <ArrowUpRight size={17} />}
               </button>
-              {file && <button className="clear-file" type="button" onClick={clearFile} disabled={busy}><X size={15} /> Remove scene</button>}
+              {requiresPair && (
+                <button className={`upload-tile ${secondFile ? 'filled' : ''}`} type="button" onClick={() => secondInputRef.current?.click()} disabled={busy}>
+                  <span className={`file-icon ${secondFile ? inputMode === 'fusion' ? 'sar' : 'optical' : ''}`}>{secondFile ? <FileImage /> : <UploadCloud />}</span>
+                  <span className="upload-copy">
+                    <strong>{secondFile ? secondFile.name : inputMode === 'temporal' ? 'Choose time B / after' : 'Choose SAR scene'}</strong>
+                    <small>{secondFile ? `${formatBytes(secondFile.size)} · ready for pair validation` : 'Same CRS, extent, resolution and grid'}</small>
+                  </span>
+                  {secondFile ? <span className="verified">Selected</span> : <ArrowUpRight size={17} />}
+                </button>
+              )}
+              {!requiresPair && file && <button className="clear-file" type="button" onClick={clearFile} disabled={busy}><X size={15} /> Remove scene</button>}
             </div>
+            {requiresPair && (file || secondFile) && <button className="clear-file pair-clear" type="button" onClick={clearFile} disabled={busy}><X size={15} /> Remove evidence set</button>}
 
             <div className="task-picker">
               <label htmlFor="task">Specialist route</label>
-              <select id="task" value={task} onChange={(event) => setTask(event.target.value as Task)} disabled={busy}>
+              <select id="task" value={route} onChange={(event) => setRoute(event.target.value as RouteChoice)} disabled={busy}>
+                <option value="auto">Auto route from question + validated inputs</option>
                 {taskOptions.map((option) => (
-                  <option key={option.value} value={option.value} disabled={!availableTasks.includes(option.value)}>
+                  <option key={option.value} value={option.value} disabled={!availableTasks.includes(option.value) || !compatibleTasks.has(option.value)}>
                     {option.label} — {option.note}
                   </option>
                 ))}
               </select>
-              <span>{selectedOption.note}</span>
+              <span>{selectedOption?.note || 'Policy router · observable'}</span>
             </div>
 
             <fieldset className="location-context">
@@ -433,8 +503,8 @@ export default function Home() {
               <label htmlFor="query">Your investigation</label>
               <textarea id="query" value={query} onChange={(event) => setQuery(event.target.value)} disabled={busy} maxLength={2000} aria-describedby="query-help" />
               <div className="prompt-footer">
-                <div className="chips" id="query-help" aria-label="Execution properties"><span>{task.replaceAll('_', ' ')}</span><span>pinned model</span><span>trace on</span></div>
-                <Button className="run-button" size="lg" onClick={runAnalysis} disabled={!file || busy}>
+                <div className="chips" id="query-help" aria-label="Execution properties"><span>{route.replaceAll('_', ' ')}</span><span>{inputMode.replaceAll('_', ' ')}</span><span>trace on</span></div>
+                <Button className="run-button" size="lg" onClick={runAnalysis} disabled={!filesReady || busy}>
                   {busy ? <><LoaderCircle className="spin" /> {phase === 'uploading' ? 'Validating' : 'Analyzing'}</> : <>Run analysis <ArrowUpRight /></>}
                 </Button>
               </div>

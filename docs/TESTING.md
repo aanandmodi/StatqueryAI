@@ -28,6 +28,7 @@ npm run build
 | Suite | What it proves | What it does not prove |
 |---|---|---|
 | Backend API | Upload, persistence, jobs, reports, overlays, errors | Real CUDA generation |
+| Pair specialists | Synthetic co-registered change and one-band SAR inputs | Semantic accuracy on CDVQA or ISRO/SAC |
 | ML utilities | Splits, preprocessing, metrics, manifests | Model quality on target domain |
 | Ruff/lint/build | Source consistency and compilability | Runtime hardware fit |
 
@@ -42,13 +43,19 @@ npm run build
 If startup fails with repeatable CUDA OOM on a clean GPU, local-laptop inference does not pass; use
 the free-GPU bridge and record that as the accepted execution profile.
 
-## End-to-end acceptance scenario
+## Five mandatory end-to-end acceptance scenarios
 
-Use a valid RGB/optical GeoTIFF that is permitted to be processed.
+Use licensed single, temporal-pair, and optical/SAR fixtures. Run
+`scripts/sih-acceptance.py` as documented in [SIH_DEMO_RUNBOOK.md](SIH_DEMO_RUNBOOK.md).
 
 | Step | Assertion |
 |---|---|
-| Upload | `201`, valid asset, SHA-256 present, raster metadata present |
+| Single VQA | One valid raster; non-empty adapted-Qwen answer and pinned provenance |
+| Additional single task | Caption and grounding both run; invalid box becomes a warning |
+| Temporal change | Time A/B validation; quantified change facts and time-B candidate evidence |
+| Optical/SAR | Declared modalities; pair compatibility; complementary proxy facts/evidence |
+| Automatic orchestration | `requested_tasks=null` selects by query and evidence configuration |
+| Upload | Every asset returns `201`, SHA-256, and raster metadata |
 | Preview | `200 image/jpeg`, non-empty body |
 | Analysis create | `202`, status `queued` |
 | Location context | Valid lat/lon/altitude appears in request provenance and user-location fact |
@@ -59,11 +66,13 @@ Use a valid RGB/optical GeoTIFF that is permitted to be processed.
 | Report | PDF endpoint returns non-empty `application/pdf` |
 | Grounding | Valid box produces an overlay; invalid/no box produces warning, not fake geometry |
 
-Run at least three semantic probes:
+The automated run executes these five registered tasks:
 
-1. `single_vqa`: a yes/no land-cover question whose answer is visually checkable.
-2. `caption`: a concise description request.
-3. `grounding`: locate one visible water, vegetation, or built-up region.
+1. `single_vqa`: a land-cover question whose answer is visually checkable.
+2. `caption`: the representative land-cover/major-objects description.
+3. `grounding`: highlight one water region.
+4. `change_vqa`: describe what changed and where.
+5. `optical_sar_fusion`: identify candidate built-up and water-covered regions jointly.
 
 Record the image license/source, query, reference answer, model answer, latency, revision, warnings,
 and manual judgement. One successful query proves integration, not model accuracy.
@@ -76,6 +85,9 @@ and manual judgement. One successful query proves integration, not model accurac
 | Grounding | Box parse rate plus localization IoU on labeled samples |
 | Change-VQA | Answer accuracy/F1 plus mask IoU/Dice on disjoint SECOND test identities |
 | Optical/SAR | Macro-F1/AP plus S2-only/S1-only ablations and dense-evidence metric |
+
+CPU pair baselines pass a **functional demonstration gate**, not the learned model-quality gate.
+Final submission evidence must include scores on the exact organizer-prescribed public splits.
 
 ## Regression policy
 

@@ -124,6 +124,7 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .upload-tile.filled { border-style: solid; }
 .file-icon { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 13px; background: #dce3fb; color: #4d65c7; }
 .file-icon.optical { background: #c9f2e9; color: #287c70; }
+.file-icon.sar { background: rgba(141,91,214,.13); color: #7b50bc; }
 .file-icon svg { width: 18px; }
 .upload-copy { min-width: 0; display: flex; flex-direction: column; flex: 1; }
 .upload-copy strong { font-size: 11px; }
@@ -131,6 +132,9 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .verified { color: #167d6b; background: rgba(102,219,201,.2); border-radius: 999px; padding: 4px 7px; font-size: 8px; font-weight: 750; text-transform: uppercase; }
 .upload-grid.single-upload { grid-template-columns: minmax(0,1fr) auto; }
 .clear-file { border: 1px solid rgba(130,64,51,.13); border-radius: 16px; padding: 0 13px; background: rgba(255,241,236,.7); color: #985542; display: inline-flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 700; cursor: pointer; }
+.pair-clear { min-height: 34px; margin-top: 8px; }
+.evidence-mode-picker { margin-top: 18px; }
+.modality-picker { margin-bottom: 2px; }
 .task-picker { margin-top: 11px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; }
 .task-picker label { color: #6d788b; font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 750; }
 .task-picker select { min-width: 0; border: 1px solid rgba(70,90,122,.12); border-radius: 12px; padding: 8px 30px 8px 10px; background: rgba(255,255,255,.65); color: var(--ink); font-size: 10px; cursor: pointer; }

@@ -57,3 +57,23 @@ def test_explicit_task_cannot_override_contract(make_asset):
 
     with pytest.raises(RoutingFailure):
         router.plan("anything", [only_optical], [TaskType.CHANGE_VQA], {})
+
+
+def test_auto_routes_ambiguous_temporal_pair_from_input_roles(make_asset):
+    router = PolicyRouter(Settings(environment="test"))
+    before = make_asset("ast_a", role=AssetRole.TIME_A)
+    after = make_asset("ast_b", role=AssetRole.TIME_B)
+
+    plan = router.plan("What can you tell me?", [before, after], None, {})
+
+    assert [step.task for step in plan.steps] == [TaskType.CHANGE_VQA]
+
+
+def test_auto_routes_ambiguous_optical_sar_pair_from_modalities(make_asset):
+    router = PolicyRouter(Settings(environment="test"))
+    optical = make_asset("ast_a", Modality.MULTISPECTRAL, AssetRole.OPTICAL)
+    sar = make_asset("ast_b", Modality.SAR, AssetRole.SAR)
+
+    plan = router.plan("Assess this paired observation", [optical, sar], None, {})
+
+    assert [step.task for step in plan.steps] == [TaskType.OPTICAL_SAR_FUSION]

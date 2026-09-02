@@ -1,8 +1,8 @@
 # SatQuery AI
 
 SatQuery is a local-first, auditable remote-sensing assistant for satellite-image questions,
-captions, visual grounding, future bi-temporal change analysis, and future optical/SAR fusion. The
-current released neural path uses the public
+captions, visual grounding, bi-temporal change analysis, and optical/SAR paired analysis. The
+released neural path uses the public
 [SatQuery Qwen3-VL LoRA](https://huggingface.co/aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora)
 on the immutable `Qwen/Qwen3-VL-2B-Instruct` base revision.
 
@@ -21,8 +21,9 @@ remain local.
 | Grounding and marked image | Ready with model caveat | Parses model boxes; never invents a box when parsing fails |
 | Text answer, warnings, provenance, trace | Ready | Schema-validated integration and SQLite job record |
 | RGB preview, informative JPEG overlay, PDF report | Ready | Overlay always labels metadata/answer; boxes appear only when valid |
-| Change-VQA | Training notebook ready | Not exposed as released until its independent gate passes |
-| Optical/SAR fusion | Training notebook ready | Not exposed as released until its independent gate passes |
+| Bi-temporal change analysis | Runnable CPU baseline | Quantified spectral-change proxy + evidence; learned CDVQA notebook remains release-gated |
+| Optical/SAR paired analysis | Runnable CPU baseline | Optical-context/backscatter proxies + evidence; learned TerraMind notebook remains release-gated |
+| Automatic agentic routing | Ready | Query + input configuration select one of five registered workflows |
 | Website deployment | Deliberately not performed | Hosting will be selected only after local acceptance |
 
 ## Local topology
@@ -33,9 +34,10 @@ flowchart LR
     Web -->|same-origin proxy| API[FastAPI controller :8000]
     API --> DB[(Local SQLite)]
     API --> Files[(Local uploads/reports)]
-    API -->|Bearer-authenticated HTTPS| Tunnel[Temporary ngrok URL]
+    API -->|single-image tasks| Tunnel[Temporary ngrok URL]
     Tunnel --> Model[Kaggle FastAPI :8080]
     Model --> GPU[Free GPU + 4-bit base + LoRA]
+    API -->|paired tasks| Pair[Bounded local CPU tools]
 ```
 
 The browser never receives model or Hugging Face credentials. It calls the local frontend route,
@@ -90,9 +92,9 @@ npm run lint
 npm run build
 ```
 
-The real end-to-end check is documented in [TESTING.md](docs/TESTING.md): it uploads a raster,
-runs a model query through the controller, waits for completion, verifies non-empty text, and
-downloads the overlay/report.
+The complete five-workflow check is documented in [SIH_DEMO_RUNBOOK.md](docs/SIH_DEMO_RUNBOOK.md)
+and automated by `scripts/sih-acceptance.py`. It verifies single VQA, caption, grounding,
+bi-temporal change, optical/SAR analysis, provenance, trace, overlays, and reports.
 
 ## Documentation index
 
@@ -107,6 +109,8 @@ downloads the overlay/report.
 | [Data model](docs/DATA_MODEL.md) | Image, location context, result, evidence and provenance schemas |
 | [API](docs/API.md) | Endpoints, schemas, lifecycle, error semantics |
 | [Testing](docs/TESTING.md) | Unit, integration, build, and real-model gates |
+| [SIH compliance matrix](docs/SIH_COMPLIANCE_MATRIX.md) | Requirement-by-requirement status and evaluation gaps |
+| [SIH demonstration runbook](docs/SIH_DEMO_RUNBOOK.md) | Exact five-workflow acceptance procedure |
 | [Security](docs/SECURITY.md) | Threat model, secrets, uploads, and retention |
 | [UI design](docs/DESIGN_UI.md) | Visual system and interaction rules |
 | [Progress](docs/PROGRESS.md) | Evidence-backed completion and remaining work |

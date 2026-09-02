@@ -201,7 +201,9 @@ class AnalysisService:
                 answer, facts, evidence, confidence, warnings = integrate_outputs(
                     outputs,
                     assets,
-                    simulated=self.settings.model_backend == "demo",
+                    simulated=any(
+                        output.model_version.startswith("demo-simulator") for output in outputs
+                    ),
                 )
                 warnings = list(
                     dict.fromkeys(compatibility_warnings + plan.rejected_intents + warnings)

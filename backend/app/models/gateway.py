@@ -19,6 +19,7 @@ from rasterio.enums import Resampling
 
 from app.config import Settings
 from app.errors import ModelUnavailableError
+from app.models.pair_tools import PAIR_TASKS, LocalPairSpecialistGateway
 from app.schemas import (
     AssetRecord,
     EvidenceItem,
@@ -144,12 +145,26 @@ class DemoSpecialistGateway:
         return [task.value for task in TaskType]
 
 
+SINGLE_IMAGE_TASKS = {
+    TaskType.SINGLE_VQA,
+    TaskType.CAPTION,
+    TaskType.GROUNDING,
+}
+
+
 class HttpSpecialistGateway:
     """Bounded HTTP bridge to the long-lived GPU inference service."""
 
-    def __init__(self, settings: Settings, asset_store: LocalAssetStore) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        asset_store: LocalAssetStore,
+        *,
+        allowed_tasks: set[TaskType] | None = None,
+    ) -> None:
         self.settings = settings
         self.asset_store = asset_store
+        self.allowed_tasks = allowed_tasks or SINGLE_IMAGE_TASKS
         token = (
             settings.model_service_token.get_secret_value()
             if settings.model_service_token
@@ -172,6 +187,11 @@ class HttpSpecialistGateway:
         query: str,
         context: GeospatialContext | None = None,
     ) -> SpecialistOutput:
+        if step.task not in self.allowed_tasks:
+            raise ModelUnavailableError(
+                "The remote specialist gateway cannot execute this task",
+                details={"task": step.task.value},
+            )
         handles = []
         try:
             files = []
@@ -212,7 +232,7 @@ class HttpSpecialistGateway:
     async def health(self) -> bool:
         urls = {
             self.settings.service_url_for_task(task.value).rstrip("/")
-            for task in TaskType
+            for task in self.allowed_tasks
         }
         for url in urls:
             try:
@@ -227,17 +247,10 @@ class HttpSpecialistGateway:
         return dict(self._versions)
 
     def supported_tasks(self) -> list[str]:
-        return [task.value for task in TaskType]
+        return sorted(task.value for task in self.allowed_tasks)
 
     async def close(self) -> None:
         await self.client.aclose()
-
-
-SPACE_TASKS = {
-    TaskType.SINGLE_VQA,
-    TaskType.CAPTION,
-    TaskType.GROUNDING,
-}
 
 
 def _scale_band(band: np.ndarray) -> np.ndarray:
@@ -425,18 +438,18 @@ class SpaceSpecialistGateway:
         query: str,
         context: GeospatialContext | None = None,
     ) -> SpecialistOutput:
-        if step.task not in SPACE_TASKS:
+        if step.task not in SINGLE_IMAGE_TASKS:
             raise ModelUnavailableError(
                 "This ZeroGPU deployment does not contain the requested specialist",
                 details={
                     "task": step.task.value,
-                    "available": sorted(task.value for task in SPACE_TASKS),
+                    "available": sorted(task.value for task in SINGLE_IMAGE_TASKS),
                     "next_step": "train and deploy the separate change/fusion specialist",
                 },
             )
         if len(assets) != 1:
             raise ModelUnavailableError(
-                "The Qwen3-VL specialist accepts exactly one optical image",
+                "The Qwen3-VL specialist accepts exactly one validated image",
                 details={"task": step.task.value, "assets": len(assets)},
             )
 
@@ -530,15 +543,67 @@ class SpaceSpecialistGateway:
         return dict(self._versions)
 
     def supported_tasks(self) -> list[str]:
-        return sorted(task.value for task in SPACE_TASKS)
+        return sorted(task.value for task in SINGLE_IMAGE_TASKS)
 
     async def close(self) -> None:
         await self.client.aclose()
 
 
+class HybridSpecialistGateway:
+    """Route released single-image inference and local paired tools together."""
+
+    def __init__(
+        self,
+        single_gateway: SpecialistGateway,
+        pair_gateway: SpecialistGateway,
+    ) -> None:
+        self.single_gateway = single_gateway
+        self.pair_gateway = pair_gateway
+
+    async def infer(
+        self,
+        step: PlannedStep,
+        assets: list[AssetRecord],
+        query: str,
+        context: GeospatialContext | None = None,
+    ) -> SpecialistOutput:
+        gateway = self.pair_gateway if step.task in PAIR_TASKS else self.single_gateway
+        return await gateway.infer(step, assets, query, context)
+
+    async def health(self) -> bool:
+        single_ok, pair_ok = await asyncio.gather(
+            self.single_gateway.health(), self.pair_gateway.health()
+        )
+        return single_ok and pair_ok
+
+    def versions(self) -> dict[str, str]:
+        return {**self.single_gateway.versions(), **self.pair_gateway.versions()}
+
+    def supported_tasks(self) -> list[str]:
+        return sorted(
+            set(self.single_gateway.supported_tasks())
+            | set(self.pair_gateway.supported_tasks())
+        )
+
+    async def close(self) -> None:
+        for gateway in (self.single_gateway, self.pair_gateway):
+            close = getattr(gateway, "close", None)
+            if close is not None:
+                await close()
+
+
 def build_gateway(settings: Settings, asset_store: LocalAssetStore) -> SpecialistGateway:
+    pair_gateway: SpecialistGateway = (
+        HttpSpecialistGateway(settings, asset_store, allowed_tasks=PAIR_TASKS)
+        if settings.pair_backend == "http"
+        else LocalPairSpecialistGateway(asset_store)
+    )
     if settings.model_backend == "http":
-        return HttpSpecialistGateway(settings, asset_store)
+        return HybridSpecialistGateway(
+            HttpSpecialistGateway(settings, asset_store), pair_gateway
+        )
     if settings.model_backend == "space":
-        return SpaceSpecialistGateway(settings, asset_store)
-    return DemoSpecialistGateway()
+        return HybridSpecialistGateway(
+            SpaceSpecialistGateway(settings, asset_store), pair_gateway
+        )
+    return HybridSpecialistGateway(DemoSpecialistGateway(), pair_gateway)

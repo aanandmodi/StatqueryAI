@@ -9,13 +9,13 @@ Last updated: 2026-09-02
 | Qwen LoRA training | Complete | Kaggle final PASS; adapter, manifests, evaluation summary, fresh reload |
 | Public adapter | Complete | Public repository at immutable SHA `ed12e59...` |
 | Kaggle VLM service | Notebook complete; user run pending | Exact 2B base + adapter, NF4, FastAPI + ngrok smoke gates |
-| Controller | Complete for released single-image tasks | Upload, policy, jobs, SQLite, trace, report, overlay tests |
-| Frontend wiring | Complete in code | Local proxy, uploads, polling, text, evidence, downloads |
+| Controller | Complete for all five mandatory workflows | Hybrid Qwen/CPU gateway, input-aware routing, trace, report, overlay tests |
+| Frontend wiring | Complete in code | Single/temporal/fusion upload modes, auto route, results and downloads |
 | Geospatial context | Implemented | Validated lat/lon/altitude reaches prompt, provenance and report |
 | Remote fallback | Removed | Browser cannot bypass the controller or call a model host directly |
 | Temporary free GPU path | Complete in notebook | Protected backend-compatible FastAPI + ngrok tunnel |
-| Change-VQA | Not released | Requires SECOND imagery/labels and metric gates |
-| Optical/SAR fusion | Not released | Requires training and fused/S2-only/S1-only gates |
+| Change-VQA | Runnable analytical baseline | Learned semantic expert still requires CDVQA/SECOND gates |
+| Optical/SAR fusion | Runnable analytical baseline | Learned TerraMind expert still requires multimodal/ablation gates |
 | Public deployment | Archived/removed | HF Spaces private; ChatGPT Site owner-only; deployment source removed |
 
 ## Completed implementation
@@ -33,18 +33,20 @@ Last updated: 2026-09-02
 - Wired the frontend only to the local controller and removed direct hosted-model fallback.
 - Added detailed architecture, system, pipeline, PRD, API, security, testing, local runbook, UI,
   model, free-tier, and progress documentation with diagrams/tables.
+- Added bounded co-registered spectral-change and optical/SAR proxy tools, hybrid task routing,
+  pair-input UI, and an automated five-workflow SIH acceptance runner.
 
 ## Verification ledger
 
 | Gate | Latest known result |
 |---|---|
-| Backend tests | 21 passed, including context + protected HTTP gateway contract |
+| Backend tests | 25 passed, including pair routing, synthetic change, and one-band SAR fusion |
 | ML utility tests | 9 passed |
 | Ruff | Passed across backend, ML, model service, scripts and server notebook |
 | Frontend lint/build | Passed; production server smoke returned HTTP 200 |
 | Notebook structure | 23 cells, valid nbformat, all 11 code cells compile |
 | Kaggle GPU/model/tunnel cells | Pending user secrets and free Kaggle session |
-| Browser → API → real Kaggle model query | Pending successful notebook cell 9 |
+| Five-workflow browser/API run | Pending licensed fixtures plus successful Kaggle notebook cell 9 |
 
 This ledger is intentionally conservative. “Implemented” is not promoted to “verified” until the
 corresponding command or real request passes.
@@ -56,16 +58,17 @@ flowchart LR
     Install[Set Kaggle and ngrok secrets] --> CUDA[Pass Kaggle GPU check]
     CUDA --> Load[Load pinned model + adapter]
     Load --> Query[Run real image query]
-    Query --> API[Run upload/analysis/report/overlay round trip]
-    API --> Build[Rerun all tests, lint, build]
+    Query --> API[Run five-workflow acceptance script]
+    API --> Benchmark[Record prescribed public-split metrics]
+    Benchmark --> Build[Rerun all tests, lint, build]
     Build --> Accept[Local MVP accepted]
 ```
 
 ## Later work, not part of current acceptance
 
 - Run and preserve the evaluation-only notebook's held-out results.
-- Train and release Change-VQA only after SECOND answer/localization gates.
-- Train and release TerraMind fusion only after multimodal and ablation gates.
+- Replace the analytical change baseline only after CDVQA/SECOND answer/localization gates.
+- Replace the analytical fusion baseline only after multimodal and ablation gates.
 - Select frontend, backend, storage, and model hosting providers with the user.
 - Design public authentication, privacy, retention, observability, and rate limits before deployment.
 

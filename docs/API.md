@@ -9,7 +9,7 @@ Base URL: `http://127.0.0.1:8000/v1`. The frontend normally calls the same endpo
 |---|---|---|---|
 | GET | `/health/live` | Process liveness | `200` |
 | GET | `/health/ready` | SQLite and model-gateway readiness | `200`, possibly `status=degraded` |
-| GET | `/capabilities` | Released tasks, limits, formats, model versions | `200` |
+| GET | `/capabilities` | Available registered tasks, limits, formats, model/tool versions | `200` |
 | POST | `/assets` | Stream and validate one raster | `201` |
 | GET | `/assets/{asset_id}` | Read asset metadata | `200` |
 | GET | `/assets/{asset_id}/preview` | Bounded RGB JPEG | `200 image/jpeg` |

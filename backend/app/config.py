@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     report_dir: Path = Path("./data/runtime/reports")
 
     model_backend: Literal["demo", "http", "space"] = "demo"
+    pair_backend: Literal["local", "http"] = "local"
     model_service_url: str = "http://model-service:8080"
     vlm_service_url: str | None = None
     change_service_url: str | None = None
@@ -93,9 +94,16 @@ class Settings(BaseSettings):
             raise RuntimeError("SATQUERY_API_KEY is required in production")
         if self.model_backend == "space" and not self.space_url:
             raise RuntimeError("SATQUERY_SPACE_URL is required when model_backend=space")
+        remote_specialist_urls = [
+            self.model_service_url,
+            self.vlm_service_url or "",
+            self.change_service_url or "",
+            self.fusion_service_url or "",
+        ]
+        uses_remote_http = self.model_backend == "http" or self.pair_backend == "http"
         if (
-            self.model_backend == "http"
-            and self.model_service_url.lower().startswith("https://")
+            uses_remote_http
+            and any(url.lower().startswith("https://") for url in remote_specialist_urls)
             and not self.model_service_token
         ):
             raise RuntimeError(

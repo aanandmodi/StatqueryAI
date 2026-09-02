@@ -38,3 +38,12 @@ def test_fusion_requires_sar(make_asset):
 
     with pytest.raises(ValidationFailure, match="one optical/multispectral and one SAR"):
         validator.validate_for_task(TaskType.OPTICAL_SAR_FUSION, [left, right])
+
+
+def test_change_requires_explicit_temporal_roles(make_asset):
+    validator = RasterValidator(Settings(environment="test"))
+    left = make_asset("ast_a")
+    right = make_asset("ast_b")
+
+    with pytest.raises(ValidationFailure, match="time_a and time_b"):
+        validator.validate_for_task(TaskType.CHANGE_VQA, [left, right])

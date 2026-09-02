@@ -91,6 +91,7 @@ async def capabilities(request: Request) -> dict[str, Any]:
             "plan_steps": state.settings.max_plan_steps,
         },
         "model_backend": state.settings.model_backend,
+        "pair_backend": state.settings.pair_backend,
         "model_versions": state.gateway.versions(),
         "trace_policy": "observable tool decisions only; no hidden chain-of-thought",
     }

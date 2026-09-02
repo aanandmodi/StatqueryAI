@@ -9,7 +9,7 @@ from rasterio.errors import RasterioIOError
 
 from app.config import Settings
 from app.errors import ValidationFailure
-from app.schemas import AssetRecord, Modality, RasterMetadata, TaskType
+from app.schemas import AssetRecord, AssetRole, Modality, RasterMetadata, TaskType
 
 TIFF_SIGNATURES = (b"II*\x00", b"MM\x00*")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -123,6 +123,12 @@ class RasterValidator:
             raise ValidationFailure(f"{task.value} requires exactly two co-registered images")
 
         modalities = {asset.modality for asset in assets}
+        if task == TaskType.CHANGE_VQA:
+            roles = {asset.role for asset in assets}
+            if roles != {AssetRole.TIME_A, AssetRole.TIME_B}:
+                raise ValidationFailure(
+                    "Change analysis requires explicit time_a and time_b asset roles"
+                )
         if task == TaskType.OPTICAL_SAR_FUSION:
             has_optical = bool(modalities & {Modality.OPTICAL, Modality.MULTISPECTRAL})
             if not has_optical or Modality.SAR not in modalities:

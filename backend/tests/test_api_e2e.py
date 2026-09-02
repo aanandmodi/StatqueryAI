@@ -48,6 +48,16 @@ def test_upload_analyse_trace_and_report(tmp_path: Path):
     write_geotiff(image_path)
 
     with TestClient(create_app(settings)) as client:
+        capabilities = client.get("/v1/capabilities")
+        assert capabilities.status_code == 200
+        assert set(capabilities.json()["tasks"]) == {
+            "single_vqa",
+            "caption",
+            "grounding",
+            "change_vqa",
+            "optical_sar_fusion",
+        }
+        assert capabilities.json()["pair_backend"] == "local"
         with image_path.open("rb") as handle:
             upload = client.post(
                 "/v1/assets",

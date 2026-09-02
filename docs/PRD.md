@@ -30,8 +30,8 @@ validation and separate specialists for single-scene, temporal, and multimodal t
 | Single-image VQA/caption | Required | Improve domain evaluation |
 | Grounding and marked image | Required with honest parsing caveat | Dedicated grounding evaluation/model |
 | Text, facts, warnings, trace, PDF | Required | Rich audit export |
-| Change-VQA | Disabled until gate | Required after training/evaluation |
-| Optical/SAR fusion | Disabled until gate | Required after training/evaluation |
+| Change-VQA | Required CPU analytical baseline | Learned semantic expert after evaluation |
+| Optical/SAR fusion | Required CPU analytical baseline | Learned TerraMind expert after evaluation |
 | Public website/backend hosting | Out of scope | User chooses providers after local acceptance |
 | Paid endpoint | Forbidden for zero-cost phase | Only with separate explicit authorization |
 
@@ -42,7 +42,7 @@ validation and separate specialists for single-scene, temporal, and multimodal t
 | FR-01 | Accept TIFF/GeoTIFF using a streamed byte cap | Oversize/corrupt file fails before inference |
 | FR-02 | Record SHA-256 and raster metadata | Asset response contains immutable identity and metadata |
 | FR-03 | Route only to registered task enums | Prompt cannot choose code, URL, file path, or model |
-| FR-04 | Enforce task/input compatibility | Single image cannot enter change/fusion; raw SAR cannot enter RGB VLM |
+| FR-04 | Enforce task/input compatibility | Single image cannot enter change/fusion; SAR is rendered as an explicit grayscale visual channel |
 | FR-05 | Run the exact released Qwen base + adapter | Result provenance contains both pinned revisions |
 | FR-06 | Return asynchronous status and terminal errors | UI can poll without blocking and explains failures |
 | FR-07 | Return text plus structured evidence/warnings | Pydantic-valid result; no fake box on parse failure |
@@ -51,6 +51,9 @@ validation and separate specialists for single-scene, temporal, and multimodal t
 | FR-10 | Support complete local startup | Browser → controller → real model query passes |
 | FR-11 | Validate latitude, longitude and optional altitude | Partial or out-of-range coordinates fail before inference |
 | FR-12 | Preserve metadata provenance | Reports label it user-supplied, never pixel-derived |
+| FR-13 | Accept a co-registered bi-temporal pair | UI and API validate two rasters and return quantified change evidence |
+| FR-14 | Accept a co-registered optical/SAR pair | UI and API return complementary candidate facts/evidence |
+| FR-15 | Automatically select the workflow | With no explicit task, query and input configuration produce a registered plan |
 
 ## Non-functional requirements
 
@@ -74,7 +77,7 @@ journey
       Start the local stack: 3: Developer
       Confirm model readiness: 4: Developer
     section Analyze
-      Choose a GeoTIFF: 5: Analyst
+      Choose one GeoTIFF or a compatible pair: 5: Analyst
       Add location metadata: 5: Analyst
       Ask a specific question: 5: Analyst
       Watch validation and model progress: 4: Analyst
@@ -90,7 +93,7 @@ journey
 - The evidence canvas and answer are the visual anchors.
 - Status copy reflects real backend phases and model availability.
 - Local/offline errors say which local process is missing.
-- Unsupported tasks are visibly disabled, not silently routed elsewhere.
+- Incompatible tasks are visibly disabled for the selected input configuration.
 - Confidence language distinguishes uncalibrated evidence quality from correctness probability.
 - The UI retains a calm cartographic frost/liquid-glass identity without generic AI-chat styling.
 
@@ -101,7 +104,7 @@ flowchart LR
     A[Static checks pass] --> B[Unit/integration tests pass]
     B --> C[Model loads exact revisions]
     C --> D[Upload succeeds]
-    D --> E[Location context validates]
+    D --> E[Single/pair compatibility validates]
     E --> F[Real query returns non-empty text]
     F --> G[Trace and provenance match]
     G --> H[Preview/report/overlay endpoints work]
@@ -120,7 +123,7 @@ profile.
 | Free notebook session expires | Inference stops | Explicit readiness/error; restart and update URL |
 | Adapter domain mismatch | Incorrect Indian-domain answer | Clear warning, Indian validation set before claims |
 | Weak grounding behavior | Missing/incorrect box | Parse validation, no fake box, localization metric gate |
-| Unsupported task demo pressure | Misleading result | Capability gate and specialist isolation |
+| Analytical pair baseline over-interpreted | Misleading semantic claim | Proxy wording, uncalibrated score, learned-model benchmark gate |
 | Exposed credential | Account compromise | Revoke pasted token; local public-model path needs no token |
 
 ## Out of scope

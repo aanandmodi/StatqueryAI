@@ -27,14 +27,17 @@ flowchart TB
     end
     subgraph Specialists[Model layer]
         Qwen[Qwen3-VL 2B + LoRA]
-        Change[Change-VQA model]
-        Fusion[Optical/SAR model]
+        Change[Bounded spectral-change tool]
+        Fusion[Bounded optical/SAR proxy tool]
+        Learned[Release-gated learned change/fusion upgrades]
     end
     UI --> Proxy --> API
     API --> Validator --> Planner --> Jobs
     Jobs --> Qwen
-    Jobs -. unreleased .-> Change
-    Jobs -. unreleased .-> Fusion
+    Jobs --> Change
+    Jobs --> Fusion
+    Learned -. replaces baseline after metric gate .-> Change
+    Learned -. replaces baseline after metric gate .-> Fusion
     Qwen --> Integrator
     Change --> Integrator
     Fusion --> Integrator
@@ -70,20 +73,23 @@ flowchart LR
 
 Changing the model location requires environment configuration, not a UI rewrite. The free-GPU
 profile uses `SATQUERY_MODEL_BACKEND=http` and the temporary ngrok HTTPS URL printed by the
-notebook. The same contract also works at `127.0.0.1:8080`.
+notebook, plus `SATQUERY_PAIR_BACKEND=local`. After learned pair experts pass their metric gates,
+`SATQUERY_PAIR_BACKEND=http` and task-specific service URLs replace the local baselines without a
+UI or controller-contract change. The same contract also works at `127.0.0.1:8080`.
 
 ## Specialist matrix
 
 | Task | Required input | Specialist | Release state | Output |
 |---|---|---|---|---|
-| `single_vqa` | One optical/multispectral raster | Qwen3-VL 2B + LoRA | Released | Text, facts, warnings |
-| `caption` | One optical/multispectral raster | Qwen3-VL 2B + LoRA | Released | Factual scene description |
-| `grounding` | One optical/multispectral raster | Qwen3-VL 2B + LoRA | Released with localization caveat | Text + optional normalized box |
-| `change_vqa` | Two co-registered temporal rasters | Change specialist | Not released | Answer + change evidence |
-| `optical_sar_fusion` | Co-registered optical and SAR rasters | TerraMind fusion specialist | Not released | Multilabel facts + dense evidence |
+| `single_vqa` | One optical/multispectral/SAR raster | Qwen3-VL 2B + LoRA | Released | Text, facts, warnings |
+| `caption` | One optical/multispectral/SAR raster | Qwen3-VL 2B + LoRA | Released | Factual scene description |
+| `grounding` | One optical/multispectral/SAR raster | Qwen3-VL 2B + LoRA | Released with localization caveat | Text + optional normalized box |
+| `change_vqa` | Two co-registered temporal rasters | Spectral-change CPU tool | Runnable baseline | Fraction, direction, candidate box, caveats |
+| `optical_sar_fusion` | Co-registered optical and SAR rasters | Optical/backscatter CPU tool | Runnable baseline | Candidate water/built-up facts and boxes |
 
-Unreleased tasks remain visible in system architecture but are disabled in capabilities. The
-single-image VLM is not allowed to impersonate temporal or sensor-fusion models.
+All five tasks are exposed by the hybrid gateway. Pair tools report uncalibrated evidence quality
+and never impersonate the learned CDVQA or TerraMind experts; those artifacts can replace the
+baseline behind the same contract after their independent metric gates pass.
 
 ## Request lifecycle
 
