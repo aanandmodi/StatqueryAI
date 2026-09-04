@@ -52,6 +52,7 @@ def build_container(settings: Settings) -> AppContainer:
         router=policy_router,
         gateway=gateway,
         artifacts=artifact_store,
+        asset_store=asset_store,
     )
     return AppContainer(
         settings=settings,
@@ -112,11 +113,17 @@ def configure_app(app: FastAPI, settings: Settings) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's wrapper does not accept Pydantic's include_* keyword arguments.
+        # Omit raw input/context: they may contain secrets or non-JSON exceptions.
+        issues = [
+            {key: issue[key] for key in ("type", "loc", "msg") if key in issue}
+            for issue in exc.errors()
+        ]
         payload = ErrorResponse(
             error=ErrorDetail(
                 code="request_validation_failed",
                 message="Request does not match the API contract",
-                details={"issues": exc.errors(include_url=False, include_context=False)},
+                details={"issues": issues},
             )
         )
         return JSONResponse(status_code=422, content=payload.model_dump(mode="json"))

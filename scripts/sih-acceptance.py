@@ -9,7 +9,7 @@ import httpx
 
 
 TASKS = (
-    ("single_vqa", "Which land-cover features are visible in this scene?"),
+    ("single_vqa", "Is water visible in this image?"),
     ("caption", "Describe the land-cover and major objects visible in this image."),
     ("grounding", "Highlight the water body referred to in the query."),
     ("change_vqa", "What changed between these two dates, and where did it occur?"),
@@ -36,6 +36,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--api-key")
+    parser.add_argument("--auto-route", action="store_true", help="Verify query-driven task selection")
+    parser.add_argument(
+        "--allow-simulated", action="store_true",
+        help="Plumbing tests only: allow visibly simulated VLM output (not model acceptance)",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
     parser.add_argument("--output", type=Path, default=Path("artifacts/sih-acceptance"))
     return parser.parse_args()
@@ -64,6 +69,9 @@ def analyze(
     query: str,
     asset_ids: list[str],
     timeout_seconds: float,
+    *,
+    auto_route: bool = False,
+    allow_simulated: bool = False,
 ) -> dict[str, object]:
     response = client.post(
         f"{base_url}/analyses",
@@ -71,7 +79,7 @@ def analyze(
         json={
             "query": query,
             "asset_ids": asset_ids,
-            "requested_tasks": [task],
+            "requested_tasks": None if auto_route else [task],
             "parameters": {},
         },
     )
@@ -95,6 +103,10 @@ def analyze(
     model_versions = result.get("provenance", {}).get("model_versions", {})
     if task not in model_versions:
         raise RuntimeError(f"{task} result is missing specialist provenance")
+    if not allow_simulated and any(
+        str(version).startswith("demo-simulator") for version in model_versions.values()
+    ):
+        raise RuntimeError(f"{task} returned a simulator response, not real model inference")
     if not result.get("trace"):
         raise RuntimeError(f"{task} result is missing the observable execution trace")
     return record
@@ -148,7 +160,12 @@ def main() -> None:
             "change_vqa": [assets["time_a"]["id"], assets["time_b"]["id"]],
             "optical_sar_fusion": [assets["optical"]["id"], assets["sar"]["id"]],
         }
-        summary: dict[str, object] = {"capabilities": sorted(available), "runs": {}}
+        summary: dict[str, object] = {
+            "capabilities": sorted(available), "runs": {},
+            "scope": "integration only; not benchmark accuracy",
+            "auto_route": args.auto_route,
+            "allow_simulated": args.allow_simulated,
+        }
         for task, query in TASKS:
             record = analyze(
                 client,
@@ -157,6 +174,8 @@ def main() -> None:
                 query,
                 [str(item) for item in task_assets[task]],
                 args.timeout_seconds,
+                auto_route=args.auto_route,
+                allow_simulated=args.allow_simulated,
             )
             save_artifacts(client, base_url, args.output, task, record)
             result = record["result"]
@@ -171,9 +190,9 @@ def main() -> None:
         (args.output / "summary.json").write_text(
             json.dumps(summary, indent=2), encoding="utf-8"
         )
-        print(f"PASS all mandatory SIH workflows; evidence saved to {args.output.resolve()}")
+        label = "SIMULATOR-ALLOWED plumbing" if args.allow_simulated else "real-model integration"
+        print(f"PASS {label}; evidence saved to {args.output.resolve()}")
 
 
 if __name__ == "__main__":
     main()
-

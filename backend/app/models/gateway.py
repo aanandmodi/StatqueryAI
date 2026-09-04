@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import Resampling
+from rasterio.enums import ColorInterp, Resampling
 
 from app.config import Settings
 from app.errors import ModelUnavailableError
@@ -197,6 +197,16 @@ class HttpSpecialistGateway:
             files = []
             for asset in assets:
                 path = self.asset_store.resolve(asset.id)
+                if asset.metadata and asset.metadata.driver == "WEBP":
+                    # Lossless transport derivative; keep the original hash/grid in provenance.
+                    # Kaggle need not have GDAL's optional WebP driver installed.
+                    with Image.open(path) as image:
+                        handle = io.BytesIO()
+                        image.save(handle, format="PNG")
+                    handle.seek(0)
+                    handles.append(handle)
+                    files.append(("assets", ("transport.png", handle, "image/png")))
+                    continue
                 handle = path.open("rb")
                 handles.append(handle)
                 files.append(
@@ -208,7 +218,12 @@ class HttpSpecialistGateway:
             payload = {
                 "step": step.model_dump(mode="json"),
                 "query": query,
-                "assets": [asset.model_dump(mode="json") for asset in assets],
+                # Keep the existing running Kaggle contract compatible. These controller-only
+                # fields remain in local provenance, not in the v1 remote Asset schema.
+                "assets": [
+                    asset.model_dump(mode="json", exclude={"input_profile", "registration_basis"})
+                    for asset in assets
+                ],
                 "context": context.model_dump(mode="json") if context else None,
             }
             response = await self.client.post(
@@ -230,16 +245,39 @@ class HttpSpecialistGateway:
                 handle.close()
 
     async def health(self) -> bool:
-        urls = {
-            self.settings.service_url_for_task(task.value).rstrip("/")
-            for task in self.allowed_tasks
+        tasks_by_url: dict[str, set[TaskType]] = {}
+        for task in self.allowed_tasks:
+            url = self.settings.service_url_for_task(task.value).rstrip("/")
+            tasks_by_url.setdefault(url, set()).add(task)
+        capability_tasks = {
+            "vlm": SINGLE_IMAGE_TASKS,
+            "change": {TaskType.CHANGE_VQA},
+            "fusion": {TaskType.OPTICAL_SAR_FUSION},
         }
-        for url in urls:
+        for url, required_tasks in tasks_by_url.items():
             try:
                 response = await self.client.get(f"{url}/ready", timeout=5.0)
                 if response.status_code != 200:
                     return False
-            except httpx.HTTPError:
+                payload = response.json()
+                if not isinstance(payload, dict) or payload.get("status") not in ("ready", "ok"):
+                    return False
+                if "checks" in payload:
+                    checks = payload["checks"]
+                    if not isinstance(checks, dict) or not all(
+                        value is True for value in checks.values()
+                    ):
+                        return False
+                # A healthy VLM URL cannot stand in for a missing change/fusion
+                # service. Both supported /ready implementations declare their
+                # capability; older generic readiness contracts may omit it.
+                if "capability" in payload:
+                    capability = payload["capability"]
+                    if not isinstance(capability, str) or not required_tasks.issubset(
+                        capability_tasks.get(capability, set())
+                    ):
+                        return False
+            except (httpx.HTTPError, ValueError):
                 return False
         return True
 
@@ -269,7 +307,11 @@ def _scale_band(band: np.ndarray) -> np.ndarray:
 
 
 def _rgb_indexes(dataset: rasterio.io.DatasetReader) -> list[int]:
-    descriptions = [str(item or "").lower() for item in dataset.descriptions]
+    interpretations = list(dataset.colorinterp)
+    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
+    if all(color in interpretations for color in colors):
+        return [interpretations.index(color) + 1 for color in colors]
+    descriptions = [str(item or "").lower().strip() for item in dataset.descriptions]
     aliases = (
         ("red", "b04", "b4"),
         ("green", "b03", "b3"),
@@ -299,9 +341,10 @@ def _rgb_indexes(dataset: rasterio.io.DatasetReader) -> list[int]:
 def render_rgb_preview(path: Path, *, max_edge: int, jpeg_quality: int) -> bytes:
     """Convert an accepted raster into a bounded RGB JPEG for the VLM.
 
-    Multispectral values are independently stretched from their 2nd to 98th
-    percentiles. This preview is an inference input, never a replacement for the
-    original immutable upload or its geospatial metadata.
+    Match the Kaggle decoder's band and radiometric policy: declared RGB first,
+    named RGB bands second, otherwise first-three bands (or grayscale). Preserve
+    uint8 imagery; independently stretch other types over valid 2nd-98th
+    percentiles. This preview never replaces the immutable original raster.
     """
 
     try:
@@ -309,17 +352,20 @@ def render_rgb_preview(path: Path, *, max_edge: int, jpeg_quality: int) -> bytes
             scale = min(1.0, max_edge / max(dataset.width, dataset.height))
             width = max(1, round(dataset.width * scale))
             height = max(1, round(dataset.height * scale))
+            indexes = _rgb_indexes(dataset)
             data = dataset.read(
-                _rgb_indexes(dataset),
+                indexes,
                 out_shape=(3, height, width),
                 resampling=Resampling.bilinear,
                 masked=True,
             )
-            bands = [
-                _scale_band(np.ma.filled(data[index].astype(np.float32), np.nan))
-                for index in range(3)
-            ]
-            image = Image.fromarray(np.stack(bands, axis=-1), mode="RGB")
+            raster = np.ma.filled(data.astype(np.float32), np.nan)
+            if all(dataset.dtypes[index - 1] == "uint8" for index in indexes):
+                rgb = np.moveaxis(np.nan_to_num(raster, nan=0.0), 0, -1)
+                rgb = np.clip(rgb, 0, 255).round().astype(np.uint8)
+            else:
+                rgb = np.stack([_scale_band(raster[index]) for index in range(3)], axis=-1)
+            image = Image.fromarray(rgb, mode="RGB")
     except rasterio.errors.RasterioIOError:
         with Image.open(path) as source:
             image = source.convert("RGB")
@@ -572,17 +618,18 @@ class HybridSpecialistGateway:
 
     async def health(self) -> bool:
         single_ok, pair_ok = await asyncio.gather(
-            self.single_gateway.health(), self.pair_gateway.health()
+            self.single_gateway.health(), self.pair_gateway.health(), return_exceptions=True
         )
-        return single_ok and pair_ok
+        # Local CPU tools being available does not make the remote VLM ready.
+        # An exception or malformed child response must also fail closed.
+        return single_ok is True and pair_ok is True
 
     def versions(self) -> dict[str, str]:
         return {**self.single_gateway.versions(), **self.pair_gateway.versions()}
 
     def supported_tasks(self) -> list[str]:
         return sorted(
-            set(self.single_gateway.supported_tasks())
-            | set(self.pair_gateway.supported_tasks())
+            set(self.single_gateway.supported_tasks()) | set(self.pair_gateway.supported_tasks())
         )
 
     async def close(self) -> None:
@@ -599,11 +646,7 @@ def build_gateway(settings: Settings, asset_store: LocalAssetStore) -> Specialis
         else LocalPairSpecialistGateway(asset_store)
     )
     if settings.model_backend == "http":
-        return HybridSpecialistGateway(
-            HttpSpecialistGateway(settings, asset_store), pair_gateway
-        )
+        return HybridSpecialistGateway(HttpSpecialistGateway(settings, asset_store), pair_gateway)
     if settings.model_backend == "space":
-        return HybridSpecialistGateway(
-            SpaceSpecialistGateway(settings, asset_store), pair_gateway
-        )
+        return HybridSpecialistGateway(SpaceSpecialistGateway(settings, asset_store), pair_gateway)
     return HybridSpecialistGateway(DemoSpecialistGateway(), pair_gateway)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from statistics import fmean
 
+from app.core.narrative import audit_visual_narrative
 from app.schemas import AssetRecord, Confidence, SpecialistOutput
 
 
@@ -10,11 +11,17 @@ def integrate_outputs(
 ) -> tuple[str, list[dict], list, Confidence, list[str]]:
     if not outputs:
         raise ValueError("At least one specialist output is required")
+    outputs = [audit_visual_narrative(output) for output in outputs]
 
-    answer = "\n\n".join(output.text for output in outputs)
+    answer = "\n\n".join(dict.fromkeys(output.text for output in outputs))
     facts = [fact for output in outputs for fact in output.facts]
     evidence = [item for output in outputs for item in output.evidence]
-    warnings = list(dict.fromkeys(warning for output in outputs for warning in output.warnings))
+    warnings = list(
+        dict.fromkeys(
+            [warning for output in outputs for warning in output.warnings]
+            + [warning for asset in assets if asset.metadata for warning in asset.metadata.warnings]
+        )
+    )
 
     raw_score = fmean(output.raw_score for output in outputs)
     input_quality = fmean(

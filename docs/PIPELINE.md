@@ -1,5 +1,17 @@
 # Model and inference pipelines
 
+The 2026-09-04 studio adds separate exploration input validation, backward-compatible remote
+transport and persistent case inspection. Candidate masks are validated/materialized before
+coverage reports. Public history/weather lookups are separate source-labelled context pipelines,
+not automatic historical image import or model-derived weather. See [Studio guide](STUDIO_GUIDE.md)
+and [evaluation plan](MODEL_EVALUATION_PLAN.md). The maintained quality cell is now v3; the live
+GPU verification in this pass used v2.
+
+For the current **report + pixel-mask upgrade**, see [Analysis quality v2](ANALYSIS_QUALITY.md):
+adapter observation → base-instruct narrative/proposals → SAM 2 candidate masks → validated local
+mask measurements and report. Green/NIR NDWI is a separate, explicitly band-gated water baseline.
+Neither path establishes pixel-perfect segmentation or replaces held-out evaluation.
+
 ## Released Qwen pipeline
 
 ```mermaid
@@ -61,15 +73,20 @@ sequenceDiagram
 | Step | Rule | Why |
 |---|---|---|
 | Decode | Rasterio for TIFF; PIL fallback only for allowed benchmark imagery | Preserve geospatial validation |
-| RGB bands | Descriptions `red/green/blue` or B04/B03/B02; 4/3/2 fallback for multispectral; grayscale repeat for fewer than 3 bands | Deterministic optical and SAR preview |
-| Stretch | Per-band 2nd–98th percentile | Make reflectance imagery viewable without altering source |
-| Resize | Long edge ≤ 448 for laptop VLM | Bound visual tokens and VRAM |
+| RGB bands | Declared color interpretation, then descriptions `red/green/blue` or B04/B03/B02; unlabeled first-three fallback; grayscale repeat for fewer than 3 bands | Prefer metadata; an unlabeled sensor layout is not guessed |
+| Stretch | Preserve ordinary uint8 RGB; otherwise per-band 2nd–98th percentile on valid pixels | Keep normal colors and exclude nodata from reflectance scaling |
+| Resize | Configured long-edge cap: bounded VLM preview; paired tools ≤512 pixels | Bound visual tokens, VRAM and CPU memory |
 | Prompt | Task-specific instruction + user question | Separate caption/VQA/grounding output contracts |
 | Decode | Greedy (`do_sample=False`) | Reproducible demo behavior |
 | Output | Pydantic specialist schema | Reject malformed model-service responses |
 
 The generated RGB image is an inference preview. The original upload, SHA-256, CRS, transform, and
 metadata remain the provenance source.
+
+The backend UI preview is JPEG and can be larger than the Kaggle VLM's 448-pixel working preview.
+Compression and resampling can therefore differ slightly; normalized evidence coordinates still
+map to the same uncropped source extent. For multispectral products, supply accurate band
+descriptions to avoid an ambiguous unlabeled fallback.
 
 ## Grounding and overlay pipeline
 
@@ -113,7 +130,10 @@ flowchart LR
 ```
 
 The runnable CPU tool is deterministic and makes no semantic-class claim. Its evidence-quality
-score is capped below calibrated-confidence display. The learned upgrade path is:
+score is capped below calibrated-confidence display. Both inputs use the time-A reference grid;
+validity requires every selected band in both inputs. The enclosing candidate box belongs to time A,
+is not a dense change mask, and may include unchanged pixels. Empty/flat inputs are rejected. The
+learned upgrade path is:
 
 ```mermaid
 flowchart LR

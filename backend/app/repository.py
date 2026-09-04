@@ -131,6 +131,14 @@ class SQLiteRepository:
             raise NotFoundError(f"Analysis {analysis_id} was not found")
         return AnalysisRecord.model_validate_json(payload)
 
+    async def list_analyses(self, limit: int = 30, offset: int = 0) -> list[AnalysisRecord]:
+        async with aiosqlite.connect(self.database_path) as db:
+            cursor = await db.execute(
+                "SELECT payload FROM analyses ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (min(100, max(1, limit)), max(0, offset)),
+            )
+            return [AnalysisRecord.model_validate_json(row[0]) for row in await cursor.fetchall()]
+
     async def get_by_idempotency_key(self, key: str) -> AnalysisRecord | None:
         payload = await self._fetch_value(
             "SELECT payload FROM analyses WHERE idempotency_key=?", (key,)

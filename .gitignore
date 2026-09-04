@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+*.tsbuildinfo
 /.venv/
 **/__pycache__/
 **/.pytest_cache/
@@ -41,6 +42,7 @@ next-env.d.ts
 /dist/
 /.wrangler/
 /outputs/
+/tmp/pdfs/
 /work/
 /backend/data/
 /data/runtime/

@@ -42,6 +42,7 @@ def test_upload_analyse_trace_and_report(tmp_path: Path):
         artifact_dir=runtime / "artifacts",
         report_dir=runtime / "reports",
         model_backend="demo",
+        api_key="",
         event_poll_seconds=0.01,
     )
     image_path = tmp_path / "scene.tif"
@@ -126,6 +127,25 @@ def test_upload_analyse_trace_and_report(tmp_path: Path):
         assert overlay.headers["content-type"] == "image/jpeg"
         assert "attachment" in overlay.headers["content-disposition"]
         assert overlay.content.startswith(b"\xff\xd8\xff")
+        selected_overlay = client.get(
+            f"/v1/analyses/{analysis_id}/overlay", params={"asset_id": asset_id}
+        )
+        assert selected_overlay.status_code == 200
+        assert asset_id in selected_overlay.headers["content-disposition"]
+        wrong_asset = client.get(
+            f"/v1/analyses/{analysis_id}/overlay", params={"asset_id": "ast_deadbeef"}
+        )
+        assert wrong_asset.status_code == 422
+        assert "does not belong" in wrong_asset.json()["error"]["message"]
+        invalid_asset = client.get(
+            f"/v1/analyses/{analysis_id}/overlay", params={"asset_id": "../another-image"}
+        )
+        assert invalid_asset.status_code == 422
+        assert invalid_asset.json()["error"]["code"] == "request_validation_failed"
+        assert all(
+            set(issue) <= {"type", "loc", "msg"}
+            for issue in invalid_asset.json()["error"]["details"]["issues"]
+        )
 
 
 def test_plain_png_rejected_outside_benchmark(tmp_path: Path):

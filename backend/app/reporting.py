@@ -48,8 +48,10 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
             textColor=colors.HexColor("#243B67"),
             spaceBefore=5 * mm,
             spaceAfter=2 * mm,
+            keepWithNext=True,
         )
     )
+    styles.add(ParagraphStyle("SatSource", parent=styles["SatBody"], keepWithNext=True))
     doc = SimpleDocTemplate(
         str(destination),
         pagesize=A4,
@@ -61,6 +63,12 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
         author="SatQuery",
     )
     result = record.result
+    uncalibrated = "uncalibrated" in result.confidence.calibration_version
+    confidence_text = (
+        f"Evidence quality: {result.confidence.level}; correctness probability is unavailable. "
+        if uncalibrated
+        else f"{result.confidence.score:.1%} ({result.confidence.level}). "
+    ) + result.confidence.meaning
     story = [
         Paragraph("SatQuery analysis report", styles["SatTitle"]),
         Paragraph(f"Analysis ID: {record.id}", styles["SatBody"]),
@@ -88,17 +96,26 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
         ),
         Paragraph("Answer", styles["SatHeading"]),
         Paragraph(_escape(result.answer), styles["SatBody"]),
+        *[
+            flowable
+            for section in result.sections
+            for flowable in [
+                Paragraph(_escape(section.title), styles["SatHeading"]),
+                Paragraph(_escape(f"Source: {section.source}"), styles["SatSource"]),
+                *[
+                    Paragraph(_escape(paragraph), styles["SatBody"])
+                    for paragraph in section.paragraphs
+                ],
+            ]
+        ],
         Paragraph("Confidence", styles["SatHeading"]),
-        Paragraph(
-            f"{result.confidence.score:.1%} ({result.confidence.level}) — "
-            f"{_escape(result.confidence.meaning)}",
-            styles["SatBody"],
-        ),
+        Paragraph(_escape(confidence_text), styles["SatBody"]),
         Paragraph("Evidence", styles["SatHeading"]),
     ]
-    evidence_rows = [["Label", "Type", "Score", "Asset"]]
+    evidence_rows = [["Label", "Type", "Evidence status", "Asset"]]
     evidence_rows.extend(
-        [item.label, item.type, f"{item.score:.1%}", item.asset_id] for item in result.evidence
+        [item.label, item.type, "Candidate; review needed", item.asset_id]
+        for item in result.evidence
     )
     story.append(_table(evidence_rows))
     story.extend([Spacer(1, 4 * mm), Paragraph("Execution trace", styles["SatHeading"])])
@@ -119,12 +136,36 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
         story.extend(
             Paragraph(f"• {_escape(warning)}", styles["SatBody"]) for warning in result.warnings
         )
-    doc.build(story)
+
+    def page_footer(canvas, document):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#66768A"))
+        canvas.drawString(18 * mm, 9 * mm, "SatQuery | Candidate evidence, not ground truth")
+        canvas.drawRightString(192 * mm, 9 * mm, f"Page {document.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=page_footer, onLaterPages=page_footer)
     return destination
 
 
 def _table(rows: list[list[str]], *, small: bool = False) -> Table:
-    table = Table(rows, repeatRows=1, hAlign="LEFT")
+    cell_style = ParagraphStyle(
+        "Cell", fontName="Helvetica", fontSize=6.8 if small else 8, leading=10, wordWrap="CJK"
+    )
+    header_style = ParagraphStyle(
+        "HeaderCell", parent=cell_style, fontName="Helvetica-Bold", textColor=colors.white
+    )
+    cells = [
+        [
+            Paragraph(_escape(str(value)), header_style if index == 0 else cell_style)
+            for value in row
+        ]
+        for index, row in enumerate(rows)
+    ]
+    table = Table(
+        cells, colWidths=[174 * mm / len(rows[0])] * len(rows[0]), repeatRows=1, hAlign="LEFT"
+    )
     table.setStyle(
         TableStyle(
             [

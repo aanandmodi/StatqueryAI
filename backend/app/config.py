@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -16,7 +19,8 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Use the same file whether Uvicorn is started from the project or backend folder.
+        env_file=PROJECT_ROOT / ".env",
         env_prefix="SATQUERY_",
         case_sensitive=False,
         extra="ignore",
@@ -65,15 +69,28 @@ class Settings(BaseSettings):
     event_poll_seconds: float = 0.5
     job_timeout_seconds: int = 900
 
-    allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    allowed_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
     api_key: SecretStr | None = None
     enable_docs: bool = True
     allow_benchmark_images: bool = True
 
+    @field_validator("api_key", "model_service_token", "space_token", mode="before")
+    @classmethod
+    def empty_optional_secret(cls, value: object) -> object:
+        # `NAME=` in a copied dotenv example means unset, not a required empty key.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def split_origins(cls, value: object) -> object:
-        if isinstance(value, str) and not value.lstrip().startswith("["):
+        if isinstance(value, str):
+            value = value.strip()
+            if value.startswith("["):
+                return json.loads(value)
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 

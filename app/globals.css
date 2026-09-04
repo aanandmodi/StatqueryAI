@@ -83,7 +83,8 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--aqua); box-shadow: 0 0 0 4px rgba(102,219,201,.16); }
 .topbar-actions { justify-self: end; display: flex; align-items: center; gap: 12px; }
 .live-pill { display: flex; align-items: center; gap: 6px; color: #3f526c; font-size: 11px; font-weight: 650; }
-.live-pill.sleeping { color: #9c5639; }
+.live-pill.degraded { color: #98620b; }
+.live-pill.offline { color: #9c5639; }
 .live-pill.checking svg { animation: spin .9s linear infinite; }
 .zero-cost-badge { border: 1px solid rgba(76,109,65,.16); border-radius: 999px; padding: 6px 9px; background: rgba(216,245,108,.5); color: #40552d; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 
@@ -133,6 +134,10 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .upload-grid.single-upload { grid-template-columns: minmax(0,1fr) auto; }
 .clear-file { border: 1px solid rgba(130,64,51,.13); border-radius: 16px; padding: 0 13px; background: rgba(255,241,236,.7); color: #985542; display: inline-flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 700; cursor: pointer; }
 .pair-clear { min-height: 34px; margin-top: 8px; }
+.pixel-grid-consent { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; margin-top: 12px; border: 1px solid rgba(64,125,146,.22); border-radius: 14px; background: rgba(227,244,241,.6); color: #234d55; cursor: pointer; }
+.pixel-grid-consent input { margin-top: 3px; accent-color: #247d76; }
+.pixel-grid-consent strong { display: block; font-size: 12px; line-height: 1.5; }
+.pixel-grid-consent small { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: #536c73; }
 .evidence-mode-picker { margin-top: 18px; }
 .modality-picker { margin-bottom: 2px; }
 .task-picker { margin-top: 11px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; }
@@ -170,7 +175,13 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .section-label button { border: 0; background: transparent; display: flex; gap: 4px; align-items: center; cursor: pointer; text-transform: none; font-size: 9px; letter-spacing: 0; }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 4px rgba(255,143,114,.14); animation: breathe 2.6s infinite; }
 .evidence-map { min-height: 265px; margin: 0; position: relative; overflow: hidden; border-radius: 20px 17px 20px 17px; background: radial-gradient(circle at 75% 18%,rgba(102,219,201,.18),transparent 32%), linear-gradient(145deg,#293d4d,#182a3d); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
-.evidence-map > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: saturate(.86) contrast(1.03); }
+.evidence-map.has-preview { min-height: 0; }
+.evidence-map > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; filter: saturate(.86) contrast(1.03); }
+.evidence-selector { display: grid; gap: 5px; margin-bottom: 10px; font-size: 10px; color: #52657a; }
+.evidence-selector select { min-width: 0; width: 100%; border: 1px solid rgba(84,110,135,.2); border-radius: 9px; background: rgba(255,255,255,.65); padding: 7px; color: #283e53; }
+.structured-facts { margin: 10px 0; color: #52657a; font-size: 10px; }
+.structured-facts summary { cursor: pointer; }
+.structured-facts pre { overflow: auto; max-height: 260px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 9px; }
 .evidence-map.has-preview::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg,transparent 55%,rgba(9,20,32,.38)); }
 .empty-orbit { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; color: rgba(230,246,249,.6); }
 .empty-orbit::before, .empty-orbit::after { content: ''; position: absolute; left: 50%; top: 50%; width: 126px; height: 48px; border: 1px solid rgba(132,229,217,.22); border-radius: 50%; transform: translate(-50%,-50%) rotate(-24deg); }
@@ -195,6 +206,18 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .answer-topline strong { color: #dff88a; }
 .answer-card h2 { margin: 10px 0 7px; max-width: 33ch; font-size: 15px; line-height: 1.25; letter-spacing: -.025em; }
 .answer-card p { margin: 0; color: #b9c4d5; font-size: 9px; line-height: 1.55; }
+.answer-card .narrative-output p { font-size: 13px; line-height: 1.75; color: #edf4ff; margin: 12px 0; white-space: pre-line; overflow-wrap: anywhere; }
+.region-report-section { border-top: 1px solid rgba(220,240,255,.18); margin-top: 18px; padding-top: 16px; }
+.region-report-section h3 { font-size: 15px; font-weight: 600; margin: 0 0 3px; }
+.region-report-section small { display: block; color: #9adbd4; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.answer-card .region-report-section p { font-size: 12px; line-height: 1.7; margin-top: 10px; color: #d4dfef; }
+.evidence-mask { z-index: 3; pointer-events: none; image-rendering: pixelated; }
+.has-preview .map-grid { display: none; }
+.mask-controls { padding: 12px 2px 0; color: #324b63; font-size: 12px; }
+.mask-controls label { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.mask-controls p { margin: 8px 0; line-height: 1.6; }
+.mask-stat { display: grid; gap: 4px; padding: 10px; margin-top: 8px; border: 1px solid #b7dbe3; border-radius: 10px; background: rgba(255,255,255,.4); }
+.mask-stat a { color: #126b83; text-decoration: underline; }
 .confidence-track { height: 3px; margin-top: 12px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.12); }
 .confidence-track span { display: block; width: 91%; height: 100%; background: linear-gradient(90deg,var(--aqua),var(--lime)); }
 .warning-list { margin-top: 10px; color: #c5cfde; font-size: 8px; }
@@ -217,6 +240,7 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .trace-card li:not(:last-child)::after { width: 1px; height: 15px; left: 11px; right: auto; top: 22px; }
 .trace-card li > span:last-child { width: 100%; }
 .trace-card li em { margin-top: 2px; color: #7a8799; font-size: 7px; line-height: 1.35; font-style: normal; white-space: normal; }
+.trace-params { margin-top: 4px; color: #52657a; font-size: 9px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .trace-empty { padding: 8px 3px 4px; color: #788598; font-size: 8px; line-height: 1.5; }
 
 @keyframes breathe { 0%,100% { box-shadow: 0 0 0 4px rgba(255,143,114,.14); } 50% { box-shadow: 0 0 0 8px rgba(255,143,114,0); } }
