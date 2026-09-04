@@ -1,5 +1,30 @@
 # UI and visual design specification
 
+## Current studio revision — 2026-09-04
+
+The frosted direction below is retained as historical context and is superseded by the current
+instrument-style studio. `app/studio.css` overrides the base theme with charcoal surfaces,
+mint/cyan evidence, amber warnings, readable sans-serif and compact mono metadata. Source imagery
+is never decoratively tinted. The Sites skill informed local layout/interaction work only;
+hosting was deliberately excluded by the user's instruction.
+
+| Page/surface | Current interaction |
+|---|---|
+| Investigation | Evidence profiles, role checks, editable Water/Forestry/Journalism/Change presets |
+| Scene inspector | Uncropped originals, source selection, mask toggle and opacity |
+| Temporal result | Two source-locked panes; repeated masks not double-counted |
+| Report / trace | Real result sections and actual task timings, no simulated progress |
+| Casebook / case detail | Persistent cases, JSON/PDF/marked-image downloads |
+| Archive | Working sourced historical/weather searches, explicit preparation limitations |
+| Methods | Capability and scientific-limit disclosure |
+
+File selection uses a native chooser; the historical drag/drop requirement below is not
+implemented. Layouts adapt to narrower screens; motion respects reduced-motion preferences.
+Desktop browser checks covered investigation, pair panes, reports, casebook and Archive. Full
+keyboard/screen-reader/device-matrix testing remains acceptance work, not a claimed certification.
+
+## Historical design specification (superseded)
+
 ## Direction
 
 SatQuery should feel like a calm field instrument: atmospheric, cartographic and precise. The
@@ -20,12 +45,17 @@ generic AI chat template or a collection of glowing dashboard cards.
 - Upload surface supports drag/drop and keyboard selection; each file shows modality, role,
   dimensions, bands, CRS and validation state.
 - Pair tasks make time A/time B or optical/SAR roles unmistakable.
+- The source-asset selector keeps preview and evidence on the same asset; previews preserve
+  their aspect ratio without cropping. Marked-image downloads use that same selected asset.
+- Marked-image artifacts append a readable legend/answer footer; text never covers the scene.
 - Evidence boxes/polygons use class-specific color, clear focus states and a linked legend.
 - Location context presents bounded latitude, longitude, altitude and sensor fields with provenance copy.
 - Loading shows actual phases: validating, planning, waiting on Kaggle GPU, running, integrating.
 - Quota/cold-start errors give a retry path and never imply the analysis completed.
 - Confidence language uses `calibrated probability`, `evidence quality`, or `uncalibrated estimate`.
 - The trace lists tool, task, version, permitted parameters, duration and status.
+- Readiness parses dependency JSON, distinguishes degraded/offline, and refreshes every 20 seconds.
+- Structured specialist facts are expandable; model score semantics remain visible.
 
 ## Palette and materials
 

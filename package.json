@@ -6,9 +6,10 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
+    "dev": "vinext dev --hostname localhost",
     "build": "vinext build",
-    "start": "vinext start",
+    "start": "vinext start --hostname 127.0.0.1",
+    "test:proxy": "node --test tests/proxy.test.mjs tests/api-client.test.mjs tests/upload-limit.test.mjs",
     "lint": "oxlint",
     "format": "oxfmt"
   },

@@ -1,116 +1,248 @@
-# Kaggle GPU + ngrok runbook
+# Start here: Kaggle GPU → ngrok → local SatQuery
 
-## Purpose
+**Quality update:** run the new **section 6b** after starting section 6 and before 7–10. Existing
+notebooks can use the one-cell patch in `notebooks/patches/quality_upgrade.py`; see
+[detailed instructions and accuracy limits](ANALYSIS_QUALITY.md). Rerun 6b whenever you rerun 6.
 
-Run the pinned SatQuery Qwen3-VL adapter on a free Kaggle/Colab GPU while the website, controller,
-database, uploads, reports, and overlays remain on the laptop. This is temporary development
-access, not a production deployment.
+Last checked: 2026-09-03. This workflow does **not** deploy the website. Kaggle runs the already
+fine-tuned Qwen adapter; ngrok temporarily carries API requests; the frontend, controller, uploads,
+SQLite database, paired-image tools, reports and overlays remain on your laptop.
 
 ```mermaid
 flowchart LR
-    Browser[Local browser :3000] --> Web[Local web proxy]
-    Web --> API[Local controller :8000]
-    API -->|HTTPS + bearer token| Ngrok[ngrok free tunnel]
-    Ngrok --> Server[Kaggle FastAPI :8080]
-    Server --> GPU[Qwen3-VL 2B + SatQuery LoRA]
-    GPU --> Server --> Ngrok --> API
-    API --> Overlay[Local text, PDF and marked JPEG]
+    Browser[Browser localhost:3000] --> Frontend[Local frontend]
+    Frontend --> Backend[Local FastAPI :8000]
+    Backend -->|single VQA/caption/grounding| Tunnel[ngrok HTTPS + secret]
+    Tunnel --> Model[Kaggle FastAPI :8080 + Qwen LoRA]
+    Backend -->|change / optical-SAR| Pair[Local CPU analytical tools]
+    Model --> Backend
+    Pair --> Backend
+    Backend --> Result[Text / evidence / trace / PDF / marked image]
 ```
 
-## Accounts and secrets
+## 1. One-time laptop preparation
 
-| Name | Create at | Stored in Kaggle | Stored locally | Purpose |
-|---|---|---:|---:|---|
-| `NGROK_AUTHTOKEN` | ngrok dashboard | Yes | No | Lets the notebook create a free tunnel |
-| `SATQUERY_MODEL_SERVICE_TOKEN` | Generate yourself, ≥32 random characters | Yes | `.env` | Authenticates controller → Kaggle inference |
-| Hugging Face token | Not needed | No | No | Base and adapter are public |
-
-Generate a service token in PowerShell:
-
-```powershell
-$bytes = New-Object byte[] 32
-[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-[Convert]::ToBase64String($bytes)
-```
-
-Paste the result into Kaggle Secrets and the ignored local `.env`; never commit it. The Hugging
-Face credential pasted previously must be revoked and must not be reused.
-
-## Notebook cell map
-
-| Cell/section | Action | Required success signal |
-|---:|---|---|
-| Install | Installs bounded runtime packages | No fatal pip error |
-| 1 | Reads secrets without echoing them | `Secrets loaded safely` |
-| 2 | Checks GPU | `cuda_available: true` |
-| 3 | Loads immutable base + adapter | Printed model revision and CUDA device |
-| 4 | Defines decode, prompt and box parser | Cell completes |
-| 5 | Calls the real model directly | `PASS: base + adapter generated text` |
-| 6 | Starts bearer-protected FastAPI | `PASS: ... listening ...` |
-| 7 | Calls FastAPI on Kaggle localhost | `PASS: backend-compatible ...` |
-| 8 | Opens ngrok tunnel | Printed `SATQUERY_MODEL_SERVICE_URL` |
-| 9 | Calls the same API through the Internet | `PASS: internet -> ngrok -> Kaggle ...` |
-| 10 | Keeps session alive | Cell remains running |
-
-Do not proceed after any failed assertion. Fix or restart the notebook first.
-
-## Local configuration
-
-Create `D:\Projects\Sih-2026\.env`:
-
-```dotenv
-SATQUERY_ENVIRONMENT=development
-SATQUERY_MODEL_BACKEND=http
-SATQUERY_MODEL_SERVICE_URL=https://YOUR-NGROK-DEV-DOMAIN.ngrok-free.app
-SATQUERY_MODEL_SERVICE_TOKEN=THE_SAME_RANDOM_SECRET
-SATQUERY_API_KEY=
-SATQUERY_ALLOWED_ORIGINS=http://localhost:3000
-SATQUERY_MODEL_TIMEOUT_SECONDS=300
-```
-
-Create `.env.local` from `.env.local.example`, then:
+Install **Python 3.12** and **Node.js 22 LTS or newer** if absent. Enable Python's “Add python.exe
+to PATH” installer option and reopen PowerShell. `python --version` and `node --version` must work.
+The previous `satquery` virtualenv may reference a missing Python installation, so the new setup
+uses a separate `satquery-cloud` environment and preserves the old one.
 
 ```powershell
 Set-Location D:\Projects\Sih-2026
 & .\scripts\setup-local.ps1
-& "$env:USERPROFILE\.venvs\satquery\Scripts\python.exe" .\scripts\run-local.py
 ```
 
-Open `http://localhost:3000`. Upload a valid GeoTIFF, optionally supply coordinates, and run a
-released task.
+Do **not** add `-WithLocalModel`: you do not need CUDA, PyTorch or model weights on the laptop for
+this profile. If Python is installed outside PATH, pass
+`-PythonExecutable 'C:\actual\path\to\python.exe'`. If PowerShell blocks your local script,
+review it first, then use a process-only execution policy for that PowerShell window; do not
+disable machine-wide security settings.
 
-## End-to-end verification
+## 2. Create only two secrets
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant A as Local controller
-    participant K as Kaggle API
-    participant M as Qwen model
-    U->>A: GeoTIFF + query + optional location
-    A->>A: Validate raster and context
-    A->>K: Authenticated multipart request
-    K->>M: 448px RGB + bounded prompt
-    M-->>K: Text + optional boxes
-    K-->>A: Typed specialist response
-    A-->>U: Answer + overlay + trace + report
+| Secret | Where to obtain it | Where it goes |
+|---|---|---|
+| `NGROK_AUTHTOKEN` | Free ngrok dashboard → Your Authtoken | Kaggle Secrets only |
+| `SATQUERY_MODEL_SERVICE_TOKEN` | Generate a random value yourself | Kaggle Secrets **and** ignored root `.env` |
+| Hugging Face token | Not needed for these public pinned models | Do not reuse the token previously exposed in chat |
+
+Generate the model-service secret in your own PowerShell window (keep its output private):
+
+```powershell
+$tokenBytes = New-Object byte[] 32
+$tokenGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+$tokenGenerator.GetBytes($tokenBytes)
+[Convert]::ToBase64String($tokenBytes)
+$tokenGenerator.Dispose()
 ```
 
-Acceptance requires a non-empty real answer, model revision containing `ed12e59`, a user-location
-fact when coordinates were supplied, and a successful overlay download. Grounding may legitimately
-return no boxes; that must produce a warning rather than invented geometry.
+These two tokens have different purposes. The ngrok authtoken is **not** the model-service token.
+Do not put either in chat, source code, screenshots, GitHub or notebook outputs.
 
-## Safe stop and restart
+## 3. Start a fresh Kaggle notebook
 
-1. Press `Ctrl+C` in the local runner.
-2. Interrupt notebook **cell 10**. It disconnects ngrok and asks Uvicorn to exit.
-3. Stop the Kaggle session to release GPU quota.
+1. Create a **new inference notebook**, separate from the fine-tuning notebook.
+2. Import [`SatQuery_Qwen3VL_Free_GPU_Server.ipynb`](../notebooks/SatQuery_Qwen3VL_Free_GPU_Server.ipynb).
+3. Enable **GPU** and **Internet** in notebook settings. Available accelerator/quota depends on
+   your account. This notebook uses GPU 0 only; two GPUs are not required.
+4. In Kaggle **Add-ons → Secrets**, add both names above and enable them for this notebook.
+5. Run the cells in order. You do **not** retrain or download the training dataset.
 
-If Kaggle restarts, rerun all cells. If only ngrok changes, rerun cells 8–10 and update `.env`.
-The free URL is not an uptime commitment and must never be treated as a production endpoint.
+### Exact section map
 
-## Free-tier limits
+These are the notebook **section headings**, not execution counters such as `In [18]`.
 
-ngrok's current free plan is finite (request and outbound-transfer limits apply), and Kaggle GPU
-availability/session length are best-effort. The application fails with model-unavailable status;
-there is no paid fallback and no code path provisions billed hardware.
+| Section | What it does | Continue only when |
+|---|---|---|
+| Install | Installs inference packages | No fatal pip error |
+| 1 | Loads secrets without printing them | `Secrets loaded safely` |
+| 2 | Checks GPU | `cuda_available: true` |
+| 3 | Loads the pinned 2B base and existing LoRA | Model/device printed |
+| 4 | Defines bounded decoding and generation | Completes |
+| 5 | Real generation on a synthetic transport fixture | Direct-generation `PASS` |
+| 6 | Starts protected FastAPI on Kaggle | Listening `PASS` |
+| 7 | Tests inference through Kaggle localhost | Local-contract `PASS` |
+| 8 | Opens one temporary ngrok HTTPS tunnel | Prints `SATQUERY_MODEL_SERVICE_URL=...` |
+| 9 | Tests actual inference through that public URL | Internet/tunnel `PASS` |
+| 10 | Serves during an active, bounded demonstration window | Leave running while testing the app |
+
+**Run All is acceptable in this inference notebook**, with the two secrets configured. It stops
+at any error and then spends the demo window in section 10. No paid endpoint is created. The
+synthetic smoke image proves generation/transport, not satellite benchmark accuracy.
+
+### Recover the section 8 error on an already-running Kaggle session
+
+If sections 3, 5 and 7 passed but section 8 says **“Remote proxy tunnels are not allowed on
+managed Colab runtimes”** while you are actually on Kaggle, this was a notebook detection bug.
+Kaggle's [official Dockerfile](https://github.com/Kaggle/docker-python/blob/main/Dockerfile.tmpl)
+uses a Colab base image. Inherited `COLAB_*` variables or an imported `google.colab` package do not
+prove the notebook is hosted by Colab. The fix requires both Kaggle's own `KAGGLE_KERNEL_RUN_TYPE`
+marker and its `/kaggle/working` directory before permitting this Kaggle-only tunnel workflow.
+Actual Colab and unverified runtimes remain blocked; do not spoof environment variables.
+
+1. **Do not restart, retrain, reinstall packages, or click Run All on the already-loaded session.**
+2. Open [the complete replacement section 8 cell](../notebooks/patches/section_8_ngrok.py).
+   Copy the entire file into the code cell beneath **“8. Open the temporary free ngrok tunnel”**,
+   replacing that cell's old code. This file is cell code, not a standalone laptop server.
+3. Run **section 8 only**. Expect `Runtime verified: Kaggle. Model service is running.` and an
+   HTTPS `SATQUERY_MODEL_SERVICE_URL`. Do not paste or print either secret.
+4. Run **section 9**, then **section 10** and keep the notebook attended while testing.
+5. Continue with local configuration below. If the API was stopped but the model remains loaded,
+   rerun **6 → 7 → 8 → 9 → 10**. If the whole session was lost, import the updated full notebook
+   and run it from the beginning; this still does not retrain the model.
+
+| Screenshot output | Meaning and correction |
+|---|---|
+| Model on `cuda:0`, direct-generation `PASS` | Successful GPU load and generation; do not reload to fix a tunnel guard |
+| Section 7 HTTP `200` and `PASS` | The Kaggle-local API returned actual model text; public connectivity is a separate gate |
+| Pillow `mode` deprecation | Nonfatal; updated sections 4/5 let Pillow infer RGB from the uint8 array |
+| Ignored `temperature`, `top_p`, `top_k` | Nonfatal; updated section 4 supplies neutral defaults for greedy decoding, preserving checkpoint EOS/pad configuration |
+| Rasterio `NotGeoreferencedWarning` on `smoke.tif` | Nonfatal in the old synthetic fixture; section 7 now writes an explicitly synthetic, georeferenced test TIFF |
+| API JSON `warnings` about calibration/domain | Intentional limitations; not exceptions and not removed by this fix |
+
+The warning fixes are included in the updated full notebook. They are not necessary to unblock
+the current session: replacing section 8 is sufficient if the earlier smoke tests passed. The
+synthetic TIFF's georeference is test-only; never copy it onto real images to invent a location.
+
+## 4. Connect the local controller
+
+In the repository root, create `.env` and `.env.local` from their examples **only if absent**:
+
+```powershell
+Set-Location D:\Projects\Sih-2026
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+if (-not (Test-Path .env.local)) { Copy-Item .env.local.example .env.local }
+notepad .env
+```
+
+Set these values in `.env`. Use the exact URL printed in section 8 and the exact same service
+secret you stored in Kaggle:
+
+```dotenv
+SATQUERY_ENVIRONMENT=development
+SATQUERY_MODEL_BACKEND=http
+SATQUERY_PAIR_BACKEND=local
+SATQUERY_MODEL_SERVICE_URL=https://YOUR-ACTUAL-DEV-DOMAIN.ngrok-free.app
+SATQUERY_MODEL_SERVICE_TOKEN=YOUR_SAME_RANDOM_SECRET
+SATQUERY_API_KEY=
+SATQUERY_ALLOWED_ORIGINS=["http://localhost:3000"]
+SATQUERY_MAX_UPLOAD_BYTES=52428800
+SATQUERY_MODEL_TIMEOUT_SECONDS=300
+```
+
+`.env.local` must contain:
+
+```dotenv
+SATQUERY_BACKEND_URL=http://127.0.0.1:8000
+SATQUERY_BACKEND_API_KEY=
+```
+
+The frontend URL points to your **local backend**, never to ngrok. Only the backend gets the
+ngrok URL and service secret.
+
+## 5. Run backend + frontend
+
+Recommended: one PowerShell window starts both, validates JSON readiness and cleans up its child
+processes on Ctrl+C:
+
+```powershell
+Set-Location D:\Projects\Sih-2026
+& "$env:USERPROFILE\.venvs\satquery-cloud\Scripts\python.exe" .\scripts\run-local.py --mode remote
+```
+
+Open **http://localhost:3000**. Keep this terminal and Kaggle section 10 running.
+
+### Separate terminals, if you prefer
+
+Terminal 1 — backend (run from the **repository root**):
+
+```powershell
+Set-Location D:\Projects\Sih-2026
+& "$env:USERPROFILE\.venvs\satquery-cloud\Scripts\python.exe" -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+Terminal 2 — frontend:
+
+```powershell
+Set-Location D:\Projects\Sih-2026
+npm run dev
+```
+
+Use either the single runner or separate terminals—not both simultaneously.
+
+## 6. Test the connected system
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/v1/health/ready
+Invoke-RestMethod http://127.0.0.1:8000/v1/capabilities
+```
+
+Readiness must say `status: ok` and both checks must be true. In the UI:
+
+1. Choose **one scene**, declare its modality, upload a valid georeferenced TIFF, and ask
+   “Is water visible in this image?” A real answer must show the Qwen adapter revision in its trace.
+2. Try caption/grounding. Download the marked image and PDF.
+3. Choose **bi-temporal pair** or **optical + SAR pair** for the two CPU-baseline workflows.
+   These require compatible co-registered inputs, and their output is explicitly uncalibrated.
+
+The full five-workflow command is in [SIH_DEMO_RUNBOOK.md](SIH_DEMO_RUNBOOK.md). A website build
+or synthetic PASS is not a substitute for running real satellite queries and benchmark evaluation.
+
+## 7. Stop and restart correctly
+
+- Stop local processes with **Ctrl+C**. In separate-terminal mode, stop both terminals.
+- Interrupt **section 10**, then stop the Kaggle session to release GPU quota.
+- Section 10 is bounded by default; it does not bypass provider idle/session limits.
+- If section 10 stopped and model variables still exist, rerun **sections 6–10**. Section 10 shuts
+  FastAPI down, so rerunning only the tunnel cell is insufficient.
+- If the Kaggle session restarted, run the entire inference notebook again. No retraining needed.
+- After any tunnel restart, copy its newly printed URL if different and restart the local runner.
+
+## Troubleshooting and cost boundaries
+
+| Symptom | Action |
+|---|---|
+| `python` not found / old venv cannot launch | Install Python 3.12, reopen PowerShell, run setup; use the new `satquery-cloud` env |
+| Fatal pip error | Stop; resolve the first error. Setup no longer prints success after native-command failures |
+| GPU unavailable / quota exhausted | Stop the session and wait for available quota; do not enable a paid fallback |
+| Section 8 incorrectly says Colab while on Kaggle | Apply the replacement section 8 cell above; keep the loaded model |
+| Section 9 reports no active tunnel | Section 8 must finish successfully; the demo window may also have expired |
+| ngrok 401 / invalid token | Check `NGROK_AUTHTOKEN` in Kaggle—not the separate model-service secret |
+| Model API 401 | Kaggle and local `SATQUERY_MODEL_SERVICE_TOKEN` differ |
+| Valid TIFF fails with `Failed to fetch` / frontend logs POST 413 | The frontend must load `next.config.ts` with `serverActions.bodySizeLimit: '51mb'`; restart `npm run dev` after config changes, refresh and reselect the file. The file limit remains 50 MiB |
+| ngrok 502 / offline | Rerun sections 6–10; verify section 7 before opening a tunnel |
+| HTTP 200 but HTML instead of JSON | Startup now rejects this; use the exact ngrok URL, not a dashboard URL |
+| Pair rejected | Check declared modalities, time roles, CRS, coverage, resolution, grid and band compatibility |
+| No grounding box | Inspect warning; no fabricated box will be supplied |
+
+Use ngrok's **Free** plan and assigned dev domain, with no paid upgrade or top-up. The currently
+documented free limits include 20,000 HTTP/S requests and 1 GB outbound transfer per month; check
+the dashboard because plans can change. [Official ngrok free-plan limits](https://ngrok.com/docs/pricing-limits/free-plan-limits)
+
+Kaggle provides quota-limited remote notebook compute, not a guaranteed production hosting SLA.
+Treat tunnelling as an experimental active-development path and comply with current account rules;
+if the platform blocks it, do not bypass the restriction. [Kaggle notebook documentation](https://www.kaggle.com/docs/notebooks)
+
+Do not use this reverse-proxy workflow on managed Colab runtimes: its FAQ restricts remote proxies
+and some web-service use. Colab remains an option for permitted notebook-based training/testing,
+not a recommended always-on model API here. [Official Colab restrictions](https://research.google.com/colaboratory/faq.html)

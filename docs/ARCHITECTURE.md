@@ -1,5 +1,32 @@
 # Architecture
 
+## Studio extension — 2026-09-04
+
+Exploration and strict validation are separate profiles stored with each asset. WebP is repackaged
+as PNG only for remote transport; original bytes/hash remain local. Controller-only profile fields
+are omitted from remote-v1 payloads for compatibility with already-running GPU notebooks.
+
+```mermaid
+flowchart LR
+    UI[Investigation / Casebook / Archive / Methods] --> Proxy[Allowlisted same-origin proxy]
+    Proxy --> API[Local controller]
+    API --> Validate[Strict or exploration validation]
+    Validate --> Qwen[Temporary Kaggle Qwen + SAM]
+    Validate --> Pair[Local temporal and fusion baselines]
+    API --> DB[(Local cases and immutable sources)]
+    API -->|bounded explicit searches| Catalog[Earth Search Sentinel-2]
+    API -->|location and dates| Weather[NASA POWER]
+```
+
+Context clients use fixed providers and bounded sizes/timeouts/concurrency/caches, not arbitrary
+URLs. Pair masks recompute shared validity and derive grouping from grid/mask bytes rather than
+model identifiers. [Studio guide](STUDIO_GUIDE.md) documents preparation and scientific limits.
+
+The [quality-v2 extension](ANALYSIS_QUALITY.md) adds separate adapter observations, base-instruction
+reporting and SAM 2 candidate-mask refinement in Kaggle. The local controller owns binary-mask
+validation, optional declared-band NDWI, area calculations, numeric-claim filtering and report
+assembly. The old single-image handler remains compatible but cannot generate SAM masks.
+
 ## Architectural decision
 
 SatQuery is a modular monolith plus isolated specialist processes. The controller owns validation,
@@ -67,7 +94,7 @@ flowchart LR
     B -->|SpecialistOutput| G{Gateway adapter}
     G -->|localhost HTTP| L[Local model service]
     G -->|HTTPS + bearer token| N[ngrok tunnel]
-    N --> K[Kaggle/Colab FastAPI]
+    N --> K[Temporary Kaggle FastAPI]
     G -. future authorized hosting .-> H[Authenticated GPU service]
 ```
 
@@ -90,6 +117,11 @@ UI or controller-contract change. The same contract also works at `127.0.0.1:808
 All five tasks are exposed by the hybrid gateway. Pair tools report uncalibrated evidence quality
 and never impersonate the learned CDVQA or TerraMind experts; those artifacts can replace the
 baseline behind the same contract after their independent metric gates pass.
+
+Change boxes use the time-A grid; fusion boxes use the optical grid. The UI and download route
+select the source asset explicitly and filter evidence by its asset ID. Neither rendering path
+crops the preview or transfers boxes onto another input. Pair baselines abstain on missing/shared
+nodata or insufficient signal; their candidate boxes are not semantic segmentation masks.
 
 ## Request lifecycle
 

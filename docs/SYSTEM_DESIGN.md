@@ -1,5 +1,11 @@
 # System design
 
+Studio additions are documented in [Architecture](ARCHITECTURE.md) and [Studio guide](STUDIO_GUIDE.md).
+Cases remain local SQLite records. External context queries have fixed hosts, bounded response
+sizes, timeouts, concurrency and cache limits; they neither follow arbitrary URLs nor download
+imagery. Input profiles/registration provenance are stored and cannot be replaced by camera GPS.
+Model-derived mask counts are recomputed against the source grid. No paid infrastructure is used.
+
 ## Design goals
 
 | Goal | Mechanism | Failure behavior |

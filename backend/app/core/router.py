@@ -7,7 +7,7 @@ from typing import Any
 
 from app.config import Settings
 from app.errors import RoutingFailure
-from app.schemas import AssetRecord, ExecutionPlan, Modality, PlannedStep, TaskType
+from app.schemas import AssetRecord, AssetRole, ExecutionPlan, Modality, PlannedStep, TaskType
 
 TARGET_CLASSES = {
     "water",
@@ -23,11 +23,22 @@ TARGET_CLASSES = {
     "bare soil",
 }
 
+# Display/find requests are spatial when they name a supported feature. "Show my report"
+# should remain a caption request; do not turn every occurrence of "show" into grounding.
+DISPLAY_FEATURE_PATTERN = re.compile(
+    r"\b(?:show|display|draw|find|detect|identify|map)\b[^.!?\n]{0,160}"
+    r"\b(?:water(?:\s*bodies?)?|lakes?|rivers?|ponds?|reservoirs?|built-up|urban|"
+    r"vegetation|forests?|cropland|agriculture|roads?|buildings?|flood|bare\s+soil)\b",
+    re.I,
+)
+
 TASK_PATTERNS: list[tuple[TaskType, re.Pattern[str]]] = [
     (
         TaskType.CHANGE_VQA,
         re.compile(
-            r"\b(change|changed|increase|decrease|before|after|between|temporal|date)\b", re.I
+            r"\b(changes?|changed|changing|increase[sd]?|decrease[sd]?|before|after|between|"
+            r"temporal|dates?|differences?)\b",
+            re.I,
         ),
     ),
     (
@@ -36,11 +47,16 @@ TASK_PATTERNS: list[tuple[TaskType, re.Pattern[str]]] = [
     ),
     (
         TaskType.GROUNDING,
-        re.compile(r"\b(highlight|locate|where|point|ground|bounding|region|mark)\b", re.I),
+        re.compile(
+            r"\b(highlight|locate|where|point|ground|bounding|mark|segment|mask|overlay|outline)\b",
+            re.I,
+        ),
     ),
     (
         TaskType.CAPTION,
-        re.compile(r"\b(describe|caption|summari[sz]e|what is visible|scene)\b", re.I),
+        re.compile(
+            r"\b(describe|caption|summari[sz]e|what is visible|scene|report|region)\b", re.I
+        ),
     ),
 ]
 
@@ -73,15 +89,26 @@ class PolicyRouter:
             if requested_tasks
             else self._classify(query)
         )
-        if (
-            not requested_tasks
-            and len(assets) == 2
-            and candidates
-            and all(candidate.task == TaskType.SINGLE_VQA for candidate in candidates)
-        ):
+        if not requested_tasks and len(assets) == 2:
+            # In automatic mode the pair contract is authoritative. Words such
+            # as "describe" or "locate" must not silently discard one upload.
+            # A caller can explicitly request a single-image task when intended.
             candidates = [IntentCandidate(self._task_from_pair(assets), query)]
         if not candidates:
             candidates = [IntentCandidate(TaskType.SINGLE_VQA, query)]
+        if not requested_tasks and len(assets) == 1:
+            # Every specialist receives the complete question. A grounding response
+            # already contains the report; sentence boundaries must not double GPU work.
+            tasks = {candidate.task for candidate in candidates}
+            if tasks <= {TaskType.SINGLE_VQA, TaskType.CAPTION, TaskType.GROUNDING}:
+                preferred = (
+                    TaskType.GROUNDING
+                    if TaskType.GROUNDING in tasks
+                    else TaskType.CAPTION
+                    if TaskType.CAPTION in tasks
+                    else TaskType.SINGLE_VQA
+                )
+                candidates = [IntentCandidate(preferred, query)]
 
         unique: list[IntentCandidate] = []
         seen: set[TaskType] = set()
@@ -125,6 +152,8 @@ class PolicyRouter:
 
     @staticmethod
     def _task_from_pair(assets: list[AssetRecord]) -> TaskType:
+        if {asset.role for asset in assets} == {AssetRole.TIME_A, AssetRole.TIME_B}:
+            return TaskType.CHANGE_VQA
         modalities = {asset.modality for asset in assets}
         has_optical = bool(modalities & {Modality.OPTICAL, Modality.MULTISPECTRAL})
         if has_optical and Modality.SAR in modalities:
@@ -141,10 +170,16 @@ class PolicyRouter:
         candidates: list[IntentCandidate] = []
         for clause in clauses:
             matches = [task for task, pattern in TASK_PATTERNS if pattern.search(clause)]
+            if DISPLAY_FEATURE_PATTERN.search(clause) and TaskType.GROUNDING not in matches:
+                matches.append(TaskType.GROUNDING)
             if TaskType.CHANGE_VQA in matches:
                 matches = [TaskType.CHANGE_VQA]
             elif TaskType.OPTICAL_SAR_FUSION in matches:
                 matches = [TaskType.OPTICAL_SAR_FUSION]
+            elif TaskType.GROUNDING in matches:
+                # A grounding response already includes a narrative; avoid two GPU reports
+                # for a single clause such as "outline water and describe this scene".
+                matches = [TaskType.GROUNDING]
             for task in matches or [TaskType.SINGLE_VQA]:
                 candidates.append(IntentCandidate(task, clause))
         return candidates
@@ -157,7 +192,7 @@ class PolicyRouter:
             optical = [
                 a for a in assets if a.modality in {Modality.OPTICAL, Modality.MULTISPECTRAL}
             ]
-            return optical[:1]
+            return optical[:1] or assets[:1]
         if task == TaskType.OPTICAL_SAR_FUSION:
             optical = [
                 a for a in assets if a.modality in {Modality.OPTICAL, Modality.MULTISPECTRAL}
@@ -173,8 +208,14 @@ class PolicyRouter:
         permitted: dict[str, Any] = {}
         lowered = query.lower()
         targets = [name for name in TARGET_CLASSES if name in lowered]
+        if re.search(r"\b(water|waterbodies|lakes?|rivers?|ponds?|reservoirs?)\b", lowered):
+            targets = list(set(targets) | {"water"})
         if targets:
             permitted["targets"] = sorted(targets)[:8]
+        # Spectral threshold is not a confidence percentage.
+        water_threshold = provided.get("water_index_threshold")
+        if isinstance(water_threshold, int | float) and -1 <= water_threshold <= 1:
+            permitted["water_index_threshold"] = float(water_threshold)
 
         threshold = provided.get("threshold")
         if isinstance(threshold, int | float):
@@ -199,10 +240,10 @@ class PolicyRouter:
             TaskType.CAPTION: "the query asks for a scene description from one validated image",
             TaskType.GROUNDING: "the query asks for a target region from one validated image",
             TaskType.CHANGE_VQA: (
-                "two co-registered temporal scenes and a change intent were supplied"
+                "the input contract supplies two temporal scenes for paired change analysis"
             ),
             TaskType.OPTICAL_SAR_FUSION: (
-                "a co-registered optical/SAR pair and fusion intent were supplied"
+                "the input contract supplies an optical/SAR pair for cross-modal analysis"
             ),
         }
         return f"{reasons[task]} (modalities: {modalities})"

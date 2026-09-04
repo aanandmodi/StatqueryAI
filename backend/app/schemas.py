@@ -31,6 +31,16 @@ class AssetRole(StrEnum):
     TIME_B = "time_b"
 
 
+class RegistrationBasis(StrEnum):
+    GEOSPATIAL = "geospatial"
+    PIXEL_GRID = "pixel_grid"
+
+
+class InputProfile(StrEnum):
+    STRICT = "strict"
+    EXPLORATION = "exploration"
+
+
 class TaskType(StrEnum):
     SINGLE_VQA = "single_vqa"
     CAPTION = "caption"
@@ -81,6 +91,8 @@ class AssetRecord(StrictModel):
     sha256: str
     role: AssetRole
     modality: Modality
+    registration_basis: RegistrationBasis = RegistrationBasis.GEOSPATIAL
+    input_profile: InputProfile = InputProfile.STRICT
     source_dataset: str | None = None
     created_at: datetime
     metadata: RasterMetadata | None = None
@@ -194,6 +206,12 @@ class SpecialistOutput(StrictModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ReportSection(StrictModel):
+    title: str
+    source: str
+    paragraphs: list[str]
+
+
 class AnalysisResult(StrictModel):
     answer: str
     facts: list[dict[str, Any]]
@@ -203,6 +221,7 @@ class AnalysisResult(StrictModel):
     warnings: list[str] = Field(default_factory=list)
     report_url: str | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)
+    sections: list[ReportSection] = Field(default_factory=list)
 
 
 class AnalysisRecord(StrictModel):

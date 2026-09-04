@@ -1,60 +1,79 @@
 # Model serving status and future hosting decision
 
-## Current truth
+## Current execution design
 
-No website, backend, or persistent model-serving deployment is part of the current phase. The
-ngrok bridge is an ephemeral development tunnel that ends with the notebook session.
+No website, backend or persistent model endpoint is deployed by this workflow. The preferred
+profile is an attended, temporary Kaggle model process reached through ngrok; the website and
+controller remain local. It has a maximum 60-minute demo window and no automatic renewal or SLA.
+See [NGROK_KAGGLE_RUNBOOK.md](NGROK_KAGGLE_RUNBOOK.md) for current setup and free-tier boundaries.
 
-| Hugging Face object | What it is | Current live state | Callable as model API? |
-|---|---|---|---:|
-| `aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora` | Public PEFT model repository/files | Public at pinned SHA | No; `inferenceProviderMapping` is empty |
-| `aanandmodi/satquery-qwen3vl-space` | Archived static Space | Private, no hardware | No |
-| `aanandmodi/StatqueryAI` | Archived static Space | Private | No |
-| Temporary Kaggle/Colab notebook | FastAPI + ngrok while session lives | User-operated and ephemeral | Yes, while cell 10 runs |
-| Local model service | Running PyTorch process on port 8080 | Created by `scripts/run-local.py` | Yes, on localhost |
+| Component | Meaning | Callable inference API? |
+|---|---|---|
+| Public `aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora` repository | Pinned adapter files to download | Repository storage alone is not an inference endpoint |
+| Previously archived static Spaces | Historical resource status is recorded in [UNDEPLOYMENT_STATUS.md](UNDEPLOYMENT_STATUS.md) | Static HTML cannot run the Python/GPU model |
+| Temporary Kaggle notebook | User-operated FastAPI + model + ngrok | Only after live smoke checks pass and while its bounded demo window remains active |
+| Opt-in local model service | CUDA process on localhost port 8080 | Only after local loading/readiness/generation checks pass |
+| `--mode demo` | Deterministic single-image simulator | API plumbing works, but no neural VLM inference occurs |
+
+This document is not a live health probe or a current remote-account inventory. Code/build checks
+do not establish that a GPU is currently serving this model. Validate the actual session yourself
+before recording real-model acceptance.
 
 ```mermaid
 flowchart LR
-    Repo[Model repository: files] -->|download| Runtime[Running model process]
-    Runtime --> API[Callable inference API]
-    Static[Static Space: HTML only] -. no Python/GPU runtime .-> X[No inference API]
+    Repo[Versioned model files] -->|download pinned revision| Runtime[Running GPU model]
+    Runtime --> API[Protected inference API]
+    API -->|temporary ngrok HTTPS| Controller[Local controller]
+    Static[Static HTML Space] -. no model runtime .-> Unavailable[No neural inference API]
 ```
 
-Uploading weights to a model repository provides storage, versioning, and downloads. It does not
-allocate a GPU. A Gradio Space becomes an API only when its Gradio app is running. A static Space
-can be `RUNNING` while serving only HTML; it still has no `/gradio_api/*` endpoint.
+Uploading weights supplies storage and versioning, not GPU compute. Similarly, a Space reporting
+that its static site is running does not establish a Gradio or FastAPI model endpoint.
 
-## Token semantics
+## Required secrets for this workflow
 
-| Situation | Token needed? | What a token changes |
-|---|---:|---|
-| Download public model/adapter | No | Optional authentication/rate attribution |
-| Call public normal Gradio Space | No | Optional better rate limits/account attribution |
-| Call private Space | Yes, read access | Authentication |
-| ZeroGPU public Space | Optional | Uses authenticated account's daily quota instead of shared unauthenticated pool |
-| Inference Providers | Yes | Authenticates provider calls; billing/free-credit terms still apply |
+| Secret | Where stored | Purpose |
+|---|---|---|
+| `NGROK_AUTHTOKEN` | Kaggle Secrets only | Authorizes the temporary tunnel |
+| `SATQUERY_MODEL_SERVICE_TOKEN` | Kaggle Secrets and ignored repository-root `.env` | Authenticates local controller requests to Kaggle |
+| Hugging Face token | Not required for the public pinned base/adapter | Never reuse the credential previously exposed in chat |
 
-A token never creates GPU hardware, converts a static Space into Gradio, or guarantees that a
-custom LoRA is served by an Inference Provider.
+The frontend receives neither model secret. Root `.env.local` points it at the local controller,
+not at ngrok. A Hugging Face token does not create hardware, turn a static Space into a model
+server or guarantee free inference for a custom LoRA.
 
-## Current execution choices
+## Start without deployment
 
-1. Test locally with NF4 on the RTX 2050 using [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md).
-2. Recommended: use the protected Kaggle/ngrok notebook. The website/controller stay local; the
-   validated raster and context cross the temporary HTTPS model boundary.
-3. After local acceptance, choose a model host separately from frontend and backend hosts. No
-   existing script should be run until that decision is explicit.
+After one-time `scripts/setup-local.ps1` setup and Kaggle sections 1–9:
+
+```powershell
+Set-Location D:\Projects\Sih-2026
+& "$env:USERPROFILE\.venvs\satquery-cloud\Scripts\python.exe" .\scripts\run-local.py --mode remote
+```
+
+Keep section 10 running only during attended testing. Interrupt it and stop the Kaggle session
+when finished. Restart at section 6 if the API was shut down; a fresh runtime requires the entire
+inference notebook again, not retraining. Managed Colab reverse-proxy serving is not supported.
+
+Use `--mode demo` only for explicitly simulated UI/API checks. Use `--mode local` only after
+opting into local CUDA dependencies and demonstrating hardware fit. See
+[LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) for those alternatives.
 
 ## Future hosting acceptance checklist
 
-| Gate | Required evidence |
-|---|---|
-| Cost | Provider terms and hard spend cap confirm intended budget |
-| Hardware | Pinned model loads and smoke query passes |
-| Contract | `/analyze` or `/v1/infer/*` schema passes integration tests |
-| Security | Secrets server-side, authentication/rate limit defined |
-| Privacy | Upload region, retention, and deletion policy approved |
-| Reliability | Cold start, quota, timeout, and retry behavior measured |
-| Observability | Revision, request ID, errors, and latency visible |
+Deployment is a later, explicit decision. A temporary free notebook/tunnel is not a production
+hosting guarantee. Do not provision paid infrastructure or enable billing fallbacks.
 
-Deployment is a later, explicit phase and must not be inferred from implementation work.
+| Gate | Required evidence before any future hosting decision |
+|---|---|
+| Cost | Current provider terms and enforced zero-spend constraints |
+| Hardware | Pinned model loads and a real-image query succeeds |
+| Contract | Actual API matches the typed integration contract |
+| Security | Server-side secrets, authentication and rate limits |
+| Privacy | Approved image transfer, retention and deletion policy |
+| Reliability | Measured cold starts, quotas, timeouts and failures |
+| Observability | Model revision, request ID, errors, latency and trace |
+| Quality | Held-out task-specific metrics, separate from transport smoke tests |
+
+Run the strict default acceptance script with `--auto-route` before a real-model demonstration.
+Do not use `--allow-simulated` as evidence that hosting or neural inference works.

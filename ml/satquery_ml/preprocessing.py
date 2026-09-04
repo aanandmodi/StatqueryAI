@@ -7,7 +7,7 @@ from typing import Sequence
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import Resampling
+from rasterio.enums import ColorInterp, Resampling
 from rasterio.windows import Window
 
 
@@ -61,8 +61,9 @@ def percentile_stretch_rgb(
         raise ValueError("RGB preview requires exactly three bands")
     if not 0 <= lower < upper <= 100:
         raise ValueError("percentiles must satisfy 0 <= lower < upper <= 100")
-    output = np.zeros_like(bands_first, dtype=np.uint8)
-    for index, band in enumerate(bands_first.astype(np.float32)):
+    raster = np.ma.filled(np.ma.asarray(bands_first).astype(np.float32), np.nan)
+    output = np.zeros(raster.shape, dtype=np.uint8)
+    for index, band in enumerate(raster):
         valid = np.isfinite(band)
         if mask is not None:
             valid &= mask
@@ -71,36 +72,62 @@ def percentile_stretch_rgb(
             continue
         lo, hi = np.percentile(values, [lower, upper])
         if hi <= lo:
+            lo, hi = float(values.min()), float(values.max())
+        if hi <= lo:
             continue
-        output[index] = np.clip((band - lo) / (hi - lo) * 255, 0, 255).astype(np.uint8)
+        output[index][valid] = (
+            np.clip((band[valid] - lo) / (hi - lo), 0, 1) * 255
+        ).round().astype(np.uint8)
     return np.moveaxis(output, 0, -1)
+
+
+def rgb_band_indexes(source: rasterio.io.DatasetReader) -> list[int]:
+    """Use the same metadata-first visual band mapping as the Kaggle decoder."""
+    interpretations = list(source.colorinterp)
+    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
+    if all(color in interpretations for color in colors):
+        return [interpretations.index(color) + 1 for color in colors]
+    descriptions = [str(item or "").lower().strip() for item in source.descriptions]
+    aliases = (("red", "b04", "b4"), ("green", "b03", "b3"), ("blue", "b02", "b2"))
+    indexes = [
+        next((index for index, name in enumerate(descriptions, 1) if name in names), None)
+        for names in aliases
+    ]
+    if all(index is not None for index in indexes):
+        return [int(index) for index in indexes]
+    return [1, 2, 3] if source.count >= 3 else [1, 1, 1]
 
 
 def geotiff_to_rgb_preview(
     source: Path,
     destination: Path,
     *,
-    rgb_bands: tuple[int, int, int] = (4, 3, 2),
+    rgb_bands: tuple[int, int, int] | None = None,
     max_size: int = 1024,
 ) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
         with rasterio.open(source) as src:
-            if max(rgb_bands) > src.count:
+            indexes = list(rgb_bands) if rgb_bands is not None else rgb_band_indexes(src)
+            if len(indexes) != 3 or min(indexes) < 1 or max(indexes) > src.count:
                 raise ValueError(
-                    f"requested bands {rgb_bands} exceed raster band count {src.count}"
+                    f"requested RGB bands {indexes} are invalid for raster band count {src.count}"
                 )
             scale = min(1.0, max_size / max(src.width, src.height))
             out_width = max(1, round(src.width * scale))
             out_height = max(1, round(src.height * scale))
             data = src.read(
-                list(rgb_bands),
+                indexes,
                 out_shape=(3, out_height, out_width),
                 resampling=Resampling.bilinear,
                 masked=True,
             )
-            mask = ~np.any(np.ma.getmaskarray(data), axis=0)
-            rgb = percentile_stretch_rgb(np.asarray(data.filled(0)), mask=mask)
+            raster = np.ma.filled(data.astype(np.float32), np.nan)
+            if all(src.dtypes[index - 1] == "uint8" for index in indexes):
+                rgb = np.moveaxis(np.nan_to_num(raster, nan=0.0), 0, -1)
+                rgb = np.clip(rgb, 0, 255).round().astype(np.uint8)
+            else:
+                rgb = percentile_stretch_rgb(raster)
     Image.fromarray(rgb, mode="RGB").save(destination, format="PNG", optimize=True)
     return destination
 

@@ -37,6 +37,20 @@ validation and separate specialists for single-scene, temporal, and multimodal t
 
 ## Functional requirements
 
+### Exploration studio extension
+
+| ID | Requirement | Acceptance / boundary |
+|---|---|---|
+| EX-01 | Common optical images | JPG/PNG/WebP exploration; SIH strict separate |
+| EX-02 | Usable temporal pairs | Declared pixel-grid pairs supported; automatic registration absent |
+| EX-03 | Forestry/journalism reports | Editable presets and sourced sections; species/cause unvalidated |
+| EX-04 | Persistent work | Paginated cases and source-specific exports |
+| EX-05 | History from one image | Known footprint/date required; discovery works, GIS preparation manual |
+| EX-06 | Weather context | NASA regional reanalysis; no exact-pixel or causal claim |
+| EX-07 | Honest confidence | Candidate masks; held-out regional calibration/accuracy still required |
+
+See [Studio guide](STUDIO_GUIDE.md) and [evaluation plan](MODEL_EVALUATION_PLAN.md).
+
 | ID | Requirement | Acceptance |
 |---|---|---|
 | FR-01 | Accept TIFF/GeoTIFF using a streamed byte cap | Oversize/corrupt file fails before inference |

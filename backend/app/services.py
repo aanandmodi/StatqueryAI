@@ -10,9 +10,11 @@ from uuid import uuid4
 from app.config import Settings
 from app.core.integration import integrate_outputs
 from app.core.router import PolicyRouter
+from app.core.scene_report import build_scene_sections
 from app.core.validation import RasterValidator
 from app.errors import ConflictError, SatQueryError
 from app.models.gateway import SpecialistGateway
+from app.models.masks import materialize_masks, spectral_water_output
 from app.reporting import build_pdf_report
 from app.repository import SQLiteRepository
 from app.schemas import (
@@ -25,7 +27,7 @@ from app.schemas import (
     TraceEvent,
     utc_now,
 )
-from app.storage import LocalArtifactStore
+from app.storage import LocalArtifactStore, LocalAssetStore
 
 
 @dataclass
@@ -49,6 +51,7 @@ class AnalysisService:
         router: PolicyRouter,
         gateway: SpecialistGateway,
         artifacts: LocalArtifactStore,
+        asset_store: LocalAssetStore,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -56,6 +59,7 @@ class AnalysisService:
         self.router = router
         self.gateway = gateway
         self.artifacts = artifacts
+        self.asset_store = asset_store
         self._semaphore = asyncio.Semaphore(settings.max_parallel_jobs)
         self._active: dict[str, ActiveJob] = {}
 
@@ -182,6 +186,14 @@ class AnalysisService:
                         ),
                         timeout=self.settings.model_timeout_seconds,
                     )
+                    if not output.model_version.startswith("demo-simulator"):
+                        output = await asyncio.to_thread(
+                            spectral_water_output,
+                            output,
+                            step,
+                            task_assets[step.step_id],
+                            self.asset_store,
+                        )
                     outputs.append(output)
                     trace.append(
                         TraceEvent(
@@ -208,6 +220,16 @@ class AnalysisService:
                 warnings = list(
                     dict.fromkeys(compatibility_warnings + plan.rejected_intents + warnings)
                 )
+                evidence = await asyncio.to_thread(
+                    materialize_masks,
+                    record.id,
+                    evidence,
+                    assets,
+                    self.asset_store,
+                    self.artifacts,
+                    self.settings.api_prefix,
+                )
+                sections = build_scene_sections(assets, answer, evidence)
                 trace.append(
                     TraceEvent(
                         step_id="integration",
@@ -225,10 +247,15 @@ class AnalysisService:
                     confidence=confidence,
                     trace=trace,
                     warnings=warnings,
+                    sections=sections,
                     provenance={
                         "planner_version": plan.version,
                         "model_backend": self.settings.model_backend,
                         "asset_hashes": {asset.id: asset.sha256 for asset in assets},
+                        "input_profiles": {asset.id: asset.input_profile.value for asset in assets},
+                        "registration_basis": {
+                            asset.id: asset.registration_basis.value for asset in assets
+                        },
                         "model_versions": {
                             output.task.value: output.model_version for output in outputs
                         },

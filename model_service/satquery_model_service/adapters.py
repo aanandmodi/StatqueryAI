@@ -102,11 +102,7 @@ class QwenAdapter:
         if len(paths) != 1:
             raise ValueError("Qwen adapter requires one validated image")
         preview = paths[0].with_suffix(".preview.png")
-        count = int((payload.assets[0].metadata or {}).get("count", 3))
-        rgb_bands = (4, 3, 2) if count >= 4 else (1, 2, 3) if count >= 3 else (1, 1, 1)
-        geotiff_to_rgb_preview(
-            paths[0], preview, rgb_bands=rgb_bands, max_size=self.max_image_edge
-        )
+        geotiff_to_rgb_preview(paths[0], preview, max_size=self.max_image_edge)
         context_note = ""
         if payload.context:
             context_note = (
