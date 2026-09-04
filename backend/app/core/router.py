@@ -37,7 +37,11 @@ TASK_PATTERNS: list[tuple[TaskType, re.Pattern[str]]] = [
         TaskType.CHANGE_VQA,
         re.compile(
             r"\b(changes?|changed|changing|increase[sd]?|decrease[sd]?|before|after|between|"
+<<<<<<< HEAD
             r"temporal|dates?|differences?|compare[sd]?|dropped|declined|lost|loss|gained)\b",
+=======
+            r"temporal|dates?|differences?)\b",
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
             re.I,
         ),
     ),
@@ -178,6 +182,7 @@ class PolicyRouter:
             if requested_tasks
             else self._classify(query)
         )
+<<<<<<< HEAD
         if proposal and not requested_tasks:
             mapping = {
                 "describe": TaskType.CAPTION,
@@ -187,6 +192,8 @@ class PolicyRouter:
                 "fuse": TaskType.OPTICAL_SAR_FUSION,
             }
             candidates = [IntentCandidate(mapping[item], query) for item in proposal.objectives]
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
         if not requested_tasks and len(assets) == 2:
             # In automatic mode the pair contract is authoritative. Words such
             # as "describe" or "locate" must not silently discard one upload.

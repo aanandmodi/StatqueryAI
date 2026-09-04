@@ -14,7 +14,10 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 from app.models.gateway import _rgb_indexes, render_rgb_preview
+<<<<<<< HEAD
 from app.core.sensors import visual_indexes
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 
 
 def _write_image(path, data, *, colors=None, descriptions=None, mask=None):
@@ -52,12 +55,20 @@ def test_rgb_png_keeps_ordinary_uint8_colors(tmp_path):
     [
         (
             (ColorInterp.blue, ColorInterp.red, ColorInterp.undefined, ColorInterp.green),
+<<<<<<< HEAD
             ("blue", "red", "nir", "green"),
+=======
+            ("red", "green", "blue", "nir"),
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
             [2, 4, 1],
         ),
         (
             (ColorInterp.undefined,) * 4,
+<<<<<<< HEAD
             ("blue", "green", "red", "nir"),
+=======
+            (" B02 ", " B03 ", " B04 ", "nir"),
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
             [3, 2, 1],
         ),
         ((ColorInterp.undefined,) * 4, None, [1, 2, 3]),
@@ -114,7 +125,10 @@ def test_non_uint8_stretch_matches_finalized_kaggle_decoder(tmp_path):
         "np": np, "rasterio": rasterio, "Image": Image, "io": io, "Any": Any,
         "ColorInterp": ColorInterp, "Resampling": Resampling, "MemoryFile": MemoryFile,
         "UnidentifiedImageError": UnidentifiedImageError, "MAX_UPLOAD_BYTES": 50_000_000,
+<<<<<<< HEAD
         "visual_indexes": visual_indexes,
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
     }
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(notebook), "exec"), namespace)
     path = tmp_path / "reflectance.tif"

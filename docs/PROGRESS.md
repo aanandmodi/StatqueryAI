@@ -1,5 +1,6 @@
 # Project progress
 
+<<<<<<< HEAD
 ## Critical-gap implementation — 2026-09-04
 
 - Added optional learned Qwen intent proposals plus bounded dependency planning, focused step
@@ -26,6 +27,8 @@
 
 Next cloud actions: [paired expert runbook](PAIRED_EXPERT_RUNBOOK.md).
 
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 ## Studio delivery — 2026-09-04
 
 - Common optical formats, explicit profiles, PNG verification and WebP/remote-v1 compatibility

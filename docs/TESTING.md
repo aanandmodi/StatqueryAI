@@ -1,5 +1,6 @@
 # Verification and release gates
 
+<<<<<<< HEAD
 ## Critical-gap verification — 2026-09-04
 
 - **269 Python tests passed** (backend/ML CPU suites); **20 Node/proxy tests passed**.
@@ -19,6 +20,8 @@
   are software checks, not scientific validation. No new browser visual QA was performed.
 - Final local website, case route and readiness returned HTTP 200. Website/backend remain local.
 
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 ## Report/mask quality gates
 
 `backend/tests/test_masks_and_reports.py` covers binary-mask holes, background preservation,

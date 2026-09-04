@@ -5,7 +5,10 @@ from __future__ import annotations
 import ast
 import io
 import json
+<<<<<<< HEAD
 import re
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -35,9 +38,12 @@ def _cell(section: int) -> str:
 
 
 def _functions(*names: str, **namespace: Any) -> dict[str, Any]:
+<<<<<<< HEAD
     if "rgb_band_indexes" in names:
         names = (*names, "compact", "sensor_profile", "semantic_indexes", "visual_indexes")
         namespace.setdefault("re", re)
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
     nodes = [
         node for node in ast.parse(SOURCE).body
         if isinstance(node, ast.FunctionDef) and node.name in names

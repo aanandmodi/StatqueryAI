@@ -1,5 +1,6 @@
 # Architecture
 
+<<<<<<< HEAD
 ## Bounded learned-proposal extension — 2026-09-04
 
 The controller now owns a dependency DAG rather than a task-only flat list. An optional authenticated
@@ -14,6 +15,8 @@ Learned paired runtime artifacts use exactly the cloud-notebook class definition
 explicit spectral inputs and uncalibrated scores. Local analytical baselines remain the default
 until the separate checkpoints are trained and verified. They are not a trained change/fusion model.
 
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 ## Studio extension — 2026-09-04
 
 Exploration and strict validation are separate profiles stored with each asset. WebP is repackaged

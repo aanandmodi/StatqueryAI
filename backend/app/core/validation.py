@@ -250,6 +250,7 @@ class RasterValidator:
 
         warnings: list[str] = []
         a, b = left.metadata, right.metadata
+<<<<<<< HEAD
         if task == TaskType.CHANGE_VQA and a and b:
 
             def semantics(metadata):
@@ -266,6 +267,8 @@ class RasterValidator:
                 raise ValidationFailure(
                     "Temporal products use different declared radiometric representations"
                 )
+=======
+>>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
         if a and b and not a.crs and not b.crs:
             if task == TaskType.CHANGE_VQA and self._is_benchmark_pair(left, right):
                 warnings.append(
