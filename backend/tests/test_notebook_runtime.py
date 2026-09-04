@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import io
 import json
+import re
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -34,6 +35,9 @@ def _cell(section: int) -> str:
 
 
 def _functions(*names: str, **namespace: Any) -> dict[str, Any]:
+    if "rgb_band_indexes" in names:
+        names = (*names, "compact", "sensor_profile", "semantic_indexes", "visual_indexes")
+        namespace.setdefault("re", re)
     nodes = [
         node for node in ast.parse(SOURCE).body
         if isinstance(node, ast.FunctionDef) and node.name in names

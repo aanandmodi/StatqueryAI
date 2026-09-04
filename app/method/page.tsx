@@ -46,7 +46,9 @@ export default function Methods() {
                 <td>Two dates</td>
                 <td>
                   Local normalized selected-band difference; shared-valid pixel
-                  masks.
+                  masks by default. Optional trained CDVQA/SECOND expert uses
+                  a learned paired encoder and supervised change head. Target
+                  extent requests chain two segmentations and a separate measurement.
                 </td>
                 <td>Where values differ above a declared threshold.</td>
                 <td>
@@ -58,7 +60,8 @@ export default function Methods() {
                 <td>Optical + SAR</td>
                 <td>
                   Local color/texture + relative backscatter proxy, masks on the
-                  optical reference.
+                  optical reference by default. A separately trained TerraMind
+                  expert can provide learned Sentinel-1/2 scene labels—not precision masks.
                 </td>
                 <td>Inspectible complementary signal candidates.</td>
                 <td>
@@ -71,6 +74,33 @@ export default function Methods() {
         </div>
       </section>
       <div className="document-grid">
+        <section className="document-panel">
+          <h2>Plans you can audit</h2>
+          <p>
+            The Kaggle instruction model can propose multiple objectives. The
+            local controller validates them and builds a bounded dependency plan;
+            it never executes model-written code. Trace provenance explicitly
+            identifies learned planning, user-selected tasks or deterministic fallback.
+          </p>
+          <p>
+            A reservoir comparison can segment each date, compare scenes, then
+            measure candidate loss and gain. Missing masks or mismatched grids
+            withhold the measurement. Surface extent is not water level.
+          </p>
+        </section>
+        <section className="document-panel">
+          <h2>Sensor identity matters</h2>
+          <p>
+            Embedded product headers and band descriptions are preserved.
+            Cartosat multispectral B2 is green and B4 is NIR; Sentinel numbering
+            is different. Unknown numeric bands remain unknown.
+          </p>
+          <p>
+            RISAT/EOS-04 RH/RV and HH/HV remain distinct polarizations. They
+            cannot be relabelled as the VV/VH inputs of a Sentinel-trained expert.
+            Pixel spacing does not establish native resolution or calibration.
+          </p>
+        </section>
         <section className="document-panel">
           <h2>Image requirements</h2>
           <ul>

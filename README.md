@@ -14,6 +14,15 @@ Managed Colab reverse-proxy serving is not supported; normal provider rules and 
 
 ## What is real today
 
+**Critical-gap correction, 2026-09-04:** [Audit and honest release gates](docs/CRITICAL_GAPS.md),
+[exact Kaggle steps](docs/PAIRED_EXPERT_RUNBOOK.md). Compound target comparisons now use a bounded
+dependency plan and measured candidate loss/gain. The optional learned planner runs through the
+existing Kaggle service; apply the [one-cell notebook](notebooks/SatQuery_Live_Planning_Upgrade.ipynb)
+to an existing session. Cartosat/RISAT product metadata is recognized without guessing band identity.
+ChangeVQA/TerraMind training exports now match strict serving architectures. Their trained artifacts
+and accuracy evaluation **remain required**; no analytical baseline is renamed as a learned model.
+The current live service reported quality-v3; its planner route was not installed at the latest check.
+
 **Studio update, 2026-09-04:** [New workflow guide](docs/STUDIO_GUIDE.md) and
 [model evaluation plan](docs/MODEL_EVALUATION_PLAN.md). Exploration supports optical JPG/PNG/WebP
 alongside TIFF while SIH strict remains separate. Investigation, Casebook, case detail, Archive
@@ -23,8 +32,8 @@ evidence. Live Sentinel discovery and NASA weather context work; historical crop
 remains manual. No website was deployed or paid service provisioned.
 
 This dated update supersedes older live-inference gates below. Scientific accuracy and learned-pair
-gates remain open. The active remote service was v2; updated notebook section 6b contains v3 prompts
-which still need to be run and smoke-tested on Kaggle.
+gates remain open. Earlier v2 observations below are historical; quality-v3 is now available on
+the running service. This does not establish regional segmentation accuracy.
 
 **Report/mask quality upgrade:** see [Analysis quality](docs/ANALYSIS_QUALITY.md).
 The local UI now supports binary masks, transparent overlays and detailed raster/mask reports.

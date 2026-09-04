@@ -1,5 +1,17 @@
 # Product requirements document
 
+## Critical-gap acceptance addendum — 2026-09-04
+
+| Requirement | Acceptance |
+|---|---|
+| Compound planning | Reservoir comparison produces separate before/after grounding plus dependent loss/gain; trace identifies learned proposal or fallback |
+| Safe measurements | Missing mask, mismatched method/threshold/grid or missing dates never produces invented metric extent, water level or causal claims |
+| Learned paired inference | Strict cloud artifact reload and real paired HTTP inference required; CPU baselines cannot satisfy this release gate |
+| Sensor-specific inputs | Cartosat numeric bands are profile-qualified; RISAT RH/RV and HH/HV never masquerade as Sentinel VV/VH |
+| Accuracy | Held-out domain/mask/answer/calibration evaluation; no perfect-confidence claim from passing software tests |
+
+Implementation and still-open gates: [Critical-gap audit](CRITICAL_GAPS.md).
+
 ## Product statement
 
 SatQuery helps an analyst ask a natural-language question about satellite imagery and receive a

@@ -9,11 +9,13 @@ from uuid import uuid4
 
 from app.config import Settings
 from app.core.integration import integrate_outputs
+from app.core.planner import propose_intents
 from app.core.router import PolicyRouter
 from app.core.scene_report import build_scene_sections
 from app.core.validation import RasterValidator
 from app.errors import ConflictError, SatQueryError
 from app.models.gateway import SpecialistGateway
+from app.models.mask_comparison import compare_mask_extent
 from app.models.masks import materialize_masks, spectral_water_output
 from app.reporting import build_pdf_report
 from app.repository import SQLiteRepository
@@ -132,16 +134,26 @@ class AnalysisService:
 
                 record = await self._transition(record, AnalysisStatus.PLANNING, 0.18)
                 started = time.perf_counter()
+                proposal, proposal_source = (
+                    await propose_intents(self.settings, record.request.query, assets)
+                    if not record.request.requested_tasks
+                    else (None, "explicit-user-tasks")
+                )
                 plan = self.router.plan(
                     record.request.query,
                     assets,
                     record.request.requested_tasks,
                     record.request.parameters,
+                    proposal=proposal,
+                    proposal_source=proposal_source,
                 )
                 task_assets: dict[str, list] = {}
                 compatibility_warnings: list[str] = []
                 for step in plan.steps:
-                    selected = [asset for asset in assets if asset.id in step.asset_ids]
+                    selected = [
+                        next(asset for asset in assets if asset.id == asset_id)
+                        for asset_id in step.asset_ids
+                    ]
                     compatibility_warnings.extend(
                         self.validator.validate_for_task(step.task, selected)
                     )
@@ -150,7 +162,7 @@ class AnalysisService:
                     TraceEvent(
                         step_id="planning",
                         task="planning",
-                        tool="closed-set-policy-router",
+                        tool=plan.proposal_source,
                         model_version=plan.version,
                         status="succeeded",
                         policy_reason=f"selected {len(plan.steps)} compatible registered task(s)",
@@ -160,6 +172,7 @@ class AnalysisService:
                 record = await self._set_plan(record, plan)
 
                 outputs = []
+                step_outputs = {}
                 for index, step in enumerate(plan.steps):
                     latest = await self.repository.get_analysis(analysis_id)
                     if latest.status == AnalysisStatus.CANCELLED:
@@ -171,20 +184,32 @@ class AnalysisService:
                         TraceEvent(
                             step_id=step.step_id,
                             task=step.task,
-                            tool=f"{step.task.value}-specialist",
+                            tool=step.operation
+                            if step.operation != "specialist"
+                            else f"{step.task.value}-specialist",
                             status="started",
                             policy_reason=step.policy_reason,
                             permitted_params=step.permitted_params,
                         )
                     )
-                    output = await asyncio.wait_for(
-                        self.gateway.infer(
+                    output = (
+                        await asyncio.to_thread(
+                            compare_mask_extent,
                             step,
+                            step_outputs,
                             task_assets[step.step_id],
-                            record.request.query,
-                            record.request.context,
-                        ),
-                        timeout=self.settings.model_timeout_seconds,
+                            self.asset_store,
+                        )
+                        if step.operation == "measure_mask_change"
+                        else await asyncio.wait_for(
+                            self.gateway.infer(
+                                step,
+                                task_assets[step.step_id],
+                                step.query or record.request.query,
+                                record.request.context,
+                            ),
+                            timeout=self.settings.model_timeout_seconds,
+                        )
                     )
                     if not output.model_version.startswith("demo-simulator"):
                         output = await asyncio.to_thread(
@@ -195,13 +220,18 @@ class AnalysisService:
                             self.asset_store,
                         )
                     outputs.append(output)
+                    step_outputs[step.step_id] = output
                     trace.append(
                         TraceEvent(
                             step_id=step.step_id,
                             task=step.task,
-                            tool=f"{step.task.value}-specialist",
+                            tool=step.operation
+                            if step.operation != "specialist"
+                            else f"{step.task.value}-specialist",
                             model_version=output.model_version,
-                            status="succeeded",
+                            status="skipped"
+                            if output.model_version.endswith(":abstained")
+                            else "succeeded",
                             policy_reason=step.policy_reason,
                             permitted_params=step.permitted_params,
                             duration_ms=self._duration_ms(started),
@@ -250,6 +280,10 @@ class AnalysisService:
                     sections=sections,
                     provenance={
                         "planner_version": plan.version,
+                        "planner_source": plan.proposal_source,
+                        "step_models": {
+                            key: value.model_version for key, value in step_outputs.items()
+                        },
                         "model_backend": self.settings.model_backend,
                         "asset_hashes": {asset.id: asset.sha256 for asset in assets},
                         "input_profiles": {asset.id: asset.input_profile.value for asset in assets},

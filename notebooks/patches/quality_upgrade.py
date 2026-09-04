@@ -55,11 +55,7 @@ def quality_decode(data):
         else:
             rgb = np.stack([scale_band(band) for band in raw], axis=-1)
         rgb[~valid] = 0
-        interpretations = list(source.colorinterp)
-        named = [str(name or "").lower().strip() for name in source.descriptions]
-        declared_rgb = all(color in interpretations for color in (ColorInterp.red, ColorInterp.green, ColorInterp.blue))
-        declared_rgb |= all(any(name in names for name in named) for names in
-                            (("red", "b04", "b4"), ("green", "b03", "b3"), ("blue", "b02", "b2")))
+        declared_rgb = semantic_indexes(source, ["red", "green", "blue"]) is not None
         info = {"width": source.width, "height": source.height, "band_indexes": indexes,
                 "declared_rgb": bool(declared_rgb), "mask_grid": [width, height]}
     return Image.fromarray(rgb), valid, info

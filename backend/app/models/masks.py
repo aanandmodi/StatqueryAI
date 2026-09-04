@@ -14,10 +14,36 @@ from PIL import Image
 from rasterio.enums import Resampling
 
 from app.core.scene_report import pixel_area_m2
+from app.core.sensors import semantic_indexes, visual_indexes
 from app.schemas import EvidenceItem, Modality, TaskType
 
 MAX_MASK_EDGE = 2048
 MAX_MASK_BYTES = 1_000_000
+
+
+def mask_support(source, shape, method):
+    """Shared support for dependent masks and their final reported statistics."""
+    height, width = shape
+    ndwi = method == "NDWI (green - NIR) / (green + NIR)"
+    indexes = semantic_indexes(source, ["green", "nir"]) if ndwi else visual_indexes(source)
+    if indexes is None:
+        raise ValueError("NDWI comparison requires verified green/NIR bands at both dates")
+    sampling = Resampling.nearest if ndwi else Resampling.bilinear
+    raw = source.read(
+        indexes, out_shape=(len(indexes), height, width), masked=True, resampling=sampling
+    ).astype(np.float32)
+    values = np.ma.filled(raw, np.nan)
+    valid = np.isfinite(values).all(axis=0)
+    valid &= source.dataset_mask(out_shape=(height, width), resampling=sampling) > 0
+    if ndwi:
+        for plane, index in enumerate(indexes):
+            values[plane] = values[plane] * source.scales[index - 1] + source.offsets[index - 1]
+        valid &= (
+            np.isfinite(values).all(axis=0)
+            & (values >= 0).all(axis=0)
+            & (values.sum(axis=0) > 1e-8)
+        )
+    return valid
 
 
 def encode_mask(mask: np.ndarray) -> str:
@@ -64,17 +90,14 @@ def spectral_water_output(output, step, assets, asset_store):
         return output
     asset = assets[0]
     with rasterio.open(asset_store.resolve(asset.id)) as source:
-        names = [str(name or "").lower().strip() for name in source.descriptions]
-        green = [i + 1 for i, name in enumerate(names) if name in {"green", "b03", "b3"}]
-        nir = [
-            i + 1 for i, name in enumerate(names) if name in {"nir", "near infrared", "b08", "b8"}
-        ]
-        if len(green) != 1 or len(nir) != 1:
+        indexes = semantic_indexes(source, ["green", "nir"])
+        if indexes is None:
             warning = (
                 "NDWI unavailable: explicit green and NIR band descriptions are missing; "
                 "RGB is not NIR."
             )
             return output.model_copy(update={"warnings": [*output.warnings, warning]})
+        green, nir = [indexes[0]], [indexes[1]]
         scale = min(1.0, MAX_MASK_EDGE / max(source.width, source.height))
         height, width = max(1, round(source.height * scale)), max(1, round(source.width * scale))
         indexes = [green[0], nir[0]]
@@ -104,6 +127,7 @@ def spectral_water_output(output, step, assets, asset_store):
             "method": "NDWI (green - NIR) / (green + NIR)",
             "threshold": threshold,
             "status": "candidate",
+            "target": "water",
             "band_indexes": indexes,
             "validity_basis": "finite nonnegative calibrated green/NIR with positive sum",
         },
@@ -162,13 +186,11 @@ def materialize_masks(analysis_id, evidence, assets, asset_store, artifacts, api
             )
             if item.geometry.get("method") == "NDWI (green - NIR) / (green + NIR)":
                 indexes = item.geometry.get("band_indexes")
-                names = [str(name or "").lower().strip() for name in source.descriptions]
                 if (
                     not isinstance(indexes, list)
                     or len(indexes) != 2
                     or not all(type(i) is int and 1 <= i <= source.count for i in indexes)
-                    or names[indexes[0] - 1] not in {"green", "b03", "b3"}
-                    or names[indexes[1] - 1] not in {"nir", "near infrared", "b08", "b8"}
+                    or indexes != semantic_indexes(source, ["green", "nir"])
                 ):
                     raise ValueError("NDWI support requires verified green/NIR band indexes")
                 spectral = source.read(
@@ -211,6 +233,11 @@ def materialize_masks(analysis_id, evidence, assets, asset_store, artifacts, api
                     asset_store.resolve(other.id), grid, visual=other.modality != Modality.SAR
                 )
                 valid &= _shared_valid(left, right)
+                if item.geometry.get("method") == "dependent same-target mask comparison":
+                    with rasterio.open(asset_store.resolve(other.id)) as other_source:
+                        support_method = item.geometry.get("support_method")
+                        valid = mask_support(source, (height, width), support_method)
+                        valid &= mask_support(other_source, (height, width), support_method)
             mask &= valid
             if comparison_id is not None:
                 # Derive grouping from bytes and the actual grid; never trust a model's group.

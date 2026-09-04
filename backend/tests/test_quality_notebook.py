@@ -14,11 +14,13 @@ from rasterio.io import MemoryFile
 from test_notebook_runtime import _functions
 
 from app.models.masks import decode_mask
+from app.core.sensors import semantic_indexes
 
 PATCH = Path(__file__).resolve().parents[2] / "notebooks/patches/quality_upgrade.py"
 
 
 def functions(*names, **namespace):
+    namespace.setdefault("semantic_indexes", semantic_indexes)
     tree = ast.parse(PATCH.read_text(encoding="utf-8"))
     nodes = [
         node

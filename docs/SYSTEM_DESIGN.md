@@ -1,5 +1,11 @@
 # System design
 
+Critical-gap extension: [bounded planner and sensor contracts](CRITICAL_GAPS.md) and
+[trained-expert lifecycle](PAIRED_EXPERT_RUNBOOK.md). No model-written code, URL or number becomes
+an executable tool or authoritative area. Dependencies are validated before execution; local
+measurement records an abstention as a skipped tool. A configured HTTP paired gateway is not
+considered ready merely because a VLM `/ready` responds: required capabilities must be present.
+
 Studio additions are documented in [Architecture](ARCHITECTURE.md) and [Studio guide](STUDIO_GUIDE.md).
 Cases remain local SQLite records. External context queries have fixed hosts, bounded response
 sizes, timeouts, concurrency and cache limits; they neither follow arbitrary URLs nor download

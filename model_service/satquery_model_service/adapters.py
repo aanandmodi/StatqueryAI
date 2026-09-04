@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Protocol
@@ -10,6 +9,7 @@ from uuid import uuid4
 import numpy as np
 
 from satquery_model_service.config import ModelSettings
+from satquery_model_service.paired_adapters import ChangeAdapter, FusionAdapter
 from satquery_model_service.contracts import (
     Evidence,
     InferencePayload,
@@ -209,189 +209,6 @@ def _grounding_box(text: str, parsed: dict[str, object] | None) -> list[float] |
                 pass
     match = _TAGGED_BOX.search(text)
     return [float(item) for item in match.groups()] if match else None
-
-
-class ChangeAdapter:
-    capability = "change"
-
-    def __init__(self, settings: ModelSettings) -> None:
-        import torch
-        from safetensors.torch import load_file
-
-        from satquery_ml.models.change import ChangeExpert
-
-        root = (settings.artifact_dir or Path()).resolve()
-        config = json.loads((root / "config.json").read_text(encoding="utf-8"))
-        self.answers = list(config["answer_labels"])
-        self.vocabulary = {
-            str(key): int(value) for key, value in config["vocabulary"].items()
-        }
-        self.temperature = float(config["calibration"]["temperature"])
-        self.threshold = float(config["calibration"].get("mask_threshold", 0.5))
-        self.device = torch.device(
-            settings.device if torch.cuda.is_available() else "cpu"
-        )
-        self.model = ChangeExpert(
-            vocabulary_size=len(self.vocabulary),
-            answer_classes=len(self.answers),
-            pretrained=False,
-        )
-        self.model.load_state_dict(load_file(root / "model.safetensors"), strict=True)
-        self.model.to(self.device).eval()
-        self.version = _manifest_version(root)
-
-    def infer(self, payload: InferencePayload, paths: list[Path]) -> SpecialistResponse:
-        import torch
-
-        if payload.step.task != "change_vqa" or len(paths) != 2:
-            raise ValueError("Change adapter requires a change_vqa task and two images")
-        arrays = [_read_raster(path, [1, 2, 3], 448) / 255.0 for path in paths]
-        tensors = [
-            torch.from_numpy(array).unsqueeze(0).to(self.device) for array in arrays
-        ]
-        tokens = [
-            self.vocabulary.get(token.lower(), 1) for token in payload.query.split()
-        ][:128]
-        tokens = tokens or [1]
-        question = torch.tensor([tokens], dtype=torch.long, device=self.device)
-        with torch.inference_mode():
-            output = self.model(tensors[0], tensors[1], question)
-            probability = torch.softmax(output.answer_logits / self.temperature, dim=1)[
-                0
-            ]
-            index = int(probability.argmax())
-            confidence = float(probability[index])
-            mask = torch.sigmoid(output.mask_logits)[0, 0].cpu().numpy()
-        evidence = []
-        if geometry := _normalized_box(mask, self.threshold):
-            evidence.append(
-                Evidence(
-                    id=f"ev_{uuid4().hex}",
-                    type="mask",
-                    label="predicted change",
-                    score=confidence,
-                    coordinate_space="normalized",
-                    geometry=geometry,
-                    asset_id=payload.assets[1].id,
-                )
-            )
-        answer = self.answers[index]
-        return SpecialistResponse(
-            task=payload.step.task,
-            text=f"The calibrated change expert predicts: {answer}.",
-            facts=[{"name": "answer_label", "value": answer}],
-            evidence=evidence,
-            raw_score=confidence,
-            score_kind="calibrated_probability",
-            model_version=self.version,
-            warnings=[]
-            if evidence
-            else ["No change region exceeded the calibrated mask threshold."],
-        )
-
-
-class FusionAdapter:
-    capability = "fusion"
-
-    def __init__(self, settings: ModelSettings) -> None:
-        import torch
-        from safetensors.torch import load_file
-
-        from satquery_ml.models.fusion import TerraMindFusionExpert
-
-        root = (settings.artifact_dir or Path()).resolve()
-        config = json.loads((root / "config.json").read_text(encoding="utf-8"))
-        self.labels = list(config["labels"])
-        self.thresholds = np.asarray(
-            config["calibration"]["thresholds"], dtype=np.float32
-        )
-        self.s1_mean = np.asarray(config["preprocessing"]["s1_mean"], dtype=np.float32)[
-            :, None, None
-        ]
-        self.s1_std = np.asarray(config["preprocessing"]["s1_std"], dtype=np.float32)[
-            :, None, None
-        ]
-        self.s2_mean = np.asarray(config["preprocessing"]["s2_mean"], dtype=np.float32)[
-            :, None, None
-        ]
-        self.s2_std = np.asarray(config["preprocessing"]["s2_std"], dtype=np.float32)[
-            :, None, None
-        ]
-        self.device = torch.device(
-            settings.device if torch.cuda.is_available() else "cpu"
-        )
-        self.model = TerraMindFusionExpert(
-            num_classes=len(self.labels),
-            backbone_name=str(config["model"].get("backbone", "terramind_v1_base")),
-            pretrained=False,
-            freeze_backbone=False,
-        )
-        self.model.load_state_dict(load_file(root / "model.safetensors"), strict=True)
-        self.model.to(self.device).eval()
-        self.version = _manifest_version(root)
-
-    def infer(self, payload: InferencePayload, paths: list[Path]) -> SpecialistResponse:
-        import torch
-
-        if payload.step.task != "optical_sar_fusion" or len(paths) != 2:
-            raise ValueError(
-                "Fusion adapter requires optical_sar_fusion and two images"
-            )
-        by_modality = {
-            asset.modality: path
-            for asset, path in zip(payload.assets, paths, strict=True)
-        }
-        optical_path = by_modality.get("optical") or by_modality.get("multispectral")
-        sar_path = by_modality.get("sar")
-        if not optical_path or not sar_path:
-            raise ValueError(
-                "Fusion inputs must declare optical/multispectral and SAR modalities"
-            )
-        s2 = (
-            _read_raster(optical_path, list(range(1, 13)), 224) - self.s2_mean
-        ) / self.s2_std
-        s1 = (_read_raster(sar_path, [1, 2], 224) - self.s1_mean) / self.s1_std
-        s2_tensor = torch.from_numpy(s2).unsqueeze(0).to(self.device)
-        s1_tensor = torch.from_numpy(s1).unsqueeze(0).to(self.device)
-        with torch.inference_mode():
-            output = self.model(s2_tensor, s1_tensor)
-            probabilities = torch.sigmoid(output.class_logits)[0].cpu().numpy()
-            mask_probabilities = (
-                torch.softmax(output.mask_logits, dim=1)[0].cpu().numpy()
-            )
-        selected = np.flatnonzero(probabilities >= self.thresholds)
-        if selected.size == 0:
-            selected = np.array([int(probabilities.argmax())])
-        facts = [
-            {"name": self.labels[index], "value": float(probabilities[index])}
-            for index in selected
-        ]
-        evidence = []
-        for index in selected[:8]:
-            if geometry := _normalized_box(mask_probabilities[index], 0.5):
-                evidence.append(
-                    Evidence(
-                        id=f"ev_{uuid4().hex}",
-                        type="mask",
-                        label=self.labels[index],
-                        score=float(probabilities[index]),
-                        coordinate_space="normalized",
-                        geometry=geometry,
-                        asset_id=payload.assets[0].id,
-                    )
-                )
-        confidence = float(max(probabilities[index] for index in selected))
-        labels = ", ".join(self.labels[index] for index in selected)
-        return SpecialistResponse(
-            task=payload.step.task,
-            text=f"The calibrated optical-SAR fusion expert detected: {labels}.",
-            facts=facts,
-            evidence=evidence,
-            raw_score=confidence,
-            score_kind="calibrated_probability",
-            model_version=self.version,
-            warnings=[],
-        )
 
 
 def build_adapter(settings: ModelSettings) -> Adapter:

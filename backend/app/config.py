@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     fusion_service_url: str | None = None
     model_service_token: SecretStr | None = None
     model_timeout_seconds: float = 180.0
+    planner_backend: Literal["policy", "auto"] = "auto"
+    planner_timeout_seconds: float = 30.0
 
     # Public Gradio/ZeroGPU Space integration. A token is optional for a public
     # Space; keeping it server-side gives the deployment account its normal quota.

@@ -171,6 +171,16 @@ class RasterValidator:
                     )
                 quality = max(0.0, 1.0 - 0.06 * len(warnings))
                 transform = list(tuple(dataset.transform)[:6])
+                from app.core.sensors import sensor_profile
+
+                try:
+                    profile = sensor_profile(dataset)
+                except ValueError as exc:
+                    raise ValidationFailure(str(exc)) from exc
+                if any("complex" in dtype for dtype in dataset.dtypes):
+                    raise ValidationFailure(
+                        "Complex SAR is unsupported; supply calibrated geocoded intensity, not SLC"
+                    )
                 return RasterMetadata(
                     driver=dataset.driver,
                     width=dataset.width,
@@ -183,6 +193,8 @@ class RasterValidator:
                     resolution=[abs(dataset.res[0]), abs(dataset.res[1])],
                     nodata=nodata,
                     tags=tags,
+                    band_descriptions=[str(value or "")[:160] for value in dataset.descriptions],
+                    sensor_profile=profile,
                     warnings=warnings,
                     quality_score=quality,
                 )
@@ -238,6 +250,22 @@ class RasterValidator:
 
         warnings: list[str] = []
         a, b = left.metadata, right.metadata
+        if task == TaskType.CHANGE_VQA and a and b:
+
+            def semantics(metadata):
+                return [
+                    (band.get("meaning"), band.get("polarization"))
+                    for band in metadata.sensor_profile.get("bands", [])
+                ]
+
+            if semantics(a) and semantics(b) and semantics(a) != semantics(b):
+                raise ValidationFailure(
+                    "Temporal bands have different declared meanings/polarizations"
+                )
+            if a.sensor_profile.get("representation") != b.sensor_profile.get("representation"):
+                raise ValidationFailure(
+                    "Temporal products use different declared radiometric representations"
+                )
         if a and b and not a.crs and not b.crs:
             if task == TaskType.CHANGE_VQA and self._is_benchmark_pair(left, right):
                 warnings.append(

@@ -67,6 +67,7 @@ def test_geotiff_preview_preserves_uint8_and_uses_named_rgb_mapping(tmp_path):
         target.write(data)
         target.colorinterp = (ColorInterp.undefined,) * 4
         target.descriptions = (" B02 ", " B03 ", " B04 ", "nir")
+        target.update_tags(SatID="Sentinel-2")
         target.write_mask(mask)
 
     geotiff_to_rgb_preview(source, destination)

@@ -79,6 +79,8 @@ class RasterMetadata(StrictModel):
     resolution: list[float]
     nodata: float | None = None
     tags: dict[str, str] = Field(default_factory=dict)
+    band_descriptions: list[str] = Field(default_factory=list)
+    sensor_profile: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     quality_score: Annotated[float, Field(ge=0, le=1)] = 1.0
 
@@ -154,12 +156,41 @@ class PlannedStep(StrictModel):
     asset_ids: list[str]
     permitted_params: dict[str, Any] = Field(default_factory=dict)
     policy_reason: str
+    operation: Literal["specialist", "measure_mask_change"] = "specialist"
+    depends_on: list[str] = Field(default_factory=list)
+    query: Annotated[str | None, Field(max_length=2_000)] = None
 
 
 class ExecutionPlan(StrictModel):
     version: str = "planner-policy-v1"
     steps: list[PlannedStep]
     rejected_intents: list[str] = Field(default_factory=list)
+    proposal_source: str = "deterministic-policy"
+
+    @model_validator(mode="after")
+    def validate_dependencies(self) -> ExecutionPlan:
+        seen: set[str] = set()
+        by_id = {}
+        for step in self.steps:
+            if step.step_id in seen or any(dep not in seen for dep in step.depends_on):
+                raise ValueError(
+                    "Plan IDs must be unique and dependencies must precede their consumer"
+                )
+            if step.operation == "measure_mask_change" and (
+                step.task != TaskType.CHANGE_VQA
+                or len(set(step.depends_on)) != 2
+                or any(
+                    by_id[dep].task != TaskType.GROUNDING
+                    or by_id[dep].operation != "specialist"
+                    or len(by_id[dep].asset_ids) != 1
+                    for dep in step.depends_on
+                )
+                or [by_id[dep].asset_ids[0] for dep in step.depends_on] != step.asset_ids
+            ):
+                raise ValueError("Mask measurement requires two prior grounding outputs")
+            seen.add(step.step_id)
+            by_id[step.step_id] = step
+        return self
 
 
 class TraceEvent(StrictModel):
@@ -199,9 +230,9 @@ class SpecialistOutput(StrictModel):
     facts: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[EvidenceItem] = Field(default_factory=list)
     raw_score: Annotated[float, Field(ge=0, le=1)]
-    score_kind: Literal[
-        "calibrated_probability", "evidence_quality", "uncalibrated"
-    ] = "uncalibrated"
+    score_kind: Literal["calibrated_probability", "evidence_quality", "uncalibrated"] = (
+        "uncalibrated"
+    )
     model_version: str
     warnings: list[str] = Field(default_factory=list)
 

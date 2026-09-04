@@ -1,5 +1,11 @@
 # Model and inference pipelines
 
+Current critical-gap flow: optional learned intent proposal → validated bounded plan → focused
+specialist calls → dependent same-target mask measurements → source-grid revalidation → reports.
+Training export/serving parity is enforced with generated shared architecture classes and strict
+v2 artifact hashes. [Runbook](PAIRED_EXPERT_RUNBOOK.md) distinguishes runnable code from trained
+and evaluated checkpoints. Analytical paired defaults are explicitly retained until release gates pass.
+
 The 2026-09-04 studio adds separate exploration input validation, backward-compatible remote
 transport and persistent case inspection. Candidate masks are validated/materialized before
 coverage reports. Public history/weather lookups are separate source-labelled context pipelines,

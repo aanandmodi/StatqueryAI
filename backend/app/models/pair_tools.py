@@ -8,7 +8,7 @@ from uuid import uuid4
 import numpy as np
 import rasterio
 from rasterio import Affine
-from rasterio.enums import ColorInterp, Resampling
+from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 
 from app.errors import ModelUnavailableError
@@ -37,31 +37,10 @@ class ReferenceGrid:
 
 
 def _band_indexes(dataset: rasterio.io.DatasetReader, *, visual: bool) -> list[int]:
+    from app.core.sensors import visual_indexes
     if not visual:
         return list(range(1, min(dataset.count, 2) + 1))
-    interpretations = list(dataset.colorinterp)
-    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
-    if all(color in interpretations for color in colors):
-        return [interpretations.index(color) + 1 for color in colors]
-    descriptions = [str(item or "").strip().lower() for item in dataset.descriptions]
-    aliases = (("red", "b04", "b4"), ("green", "b03", "b3"), ("blue", "b02", "b2"))
-    selected: list[int] = []
-    for names in aliases:
-        match = next(
-            (index for index, description in enumerate(descriptions, 1) if description in names),
-            None,
-        )
-        if match is None:
-            selected = []
-            break
-        selected.append(match)
-    if selected:
-        return selected
-    # Without sensor metadata, the first three bands are only a visual proxy;
-    # there is no universal Sentinel-style band order for an arbitrary raster.
-    if dataset.count >= 3:
-        return [1, 2, 3]
-    return [1, 1, 1]
+    return visual_indexes(dataset)
 
 
 def _reference_grid(path: Path, max_edge: int) -> ReferenceGrid:

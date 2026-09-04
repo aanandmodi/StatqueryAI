@@ -127,6 +127,7 @@ class PairStore:
     def read(self, key: str) -> dict[str, np.ndarray]:
         with self.env.begin(write=False, buffers=True) as transaction:
             payload = transaction.get(str(key).encode("utf-8"))
+            payload = bytes(payload) if payload is not None else None
         if payload is None:
             raise KeyError(f"LMDB key missing: {key}")
         return load_safetensors_bytes(bytes(payload))
@@ -195,10 +196,13 @@ class FusionDataset(Dataset):
     def __getitem__(self, index: int):
         patch_id = self.patch_ids[index]
         s2_raw, s1_raw = store.pair(patch_id)
-        s2 = torch.stack([torch.as_tensor(np.asarray(s2_raw[name]), dtype=torch.float32) for name in S2_BANDS])
-        s1 = torch.stack([torch.as_tensor(np.asarray(s1_raw[name]), dtype=torch.float32) for name in S1_BANDS])
-        s2 = F.interpolate(s2[None], (CFG.image_size, CFG.image_size), mode="bilinear", align_corners=False)[0]
-        s1 = F.interpolate(s1[None], (CFG.image_size, CFG.image_size), mode="bilinear", align_corners=False)[0]
+        # Native Sentinel bands are on different grids (10/20/60 m): resize each before stacking.
+        def aligned_bands(raw, names):
+            return torch.stack([F.interpolate(
+                torch.as_tensor(np.asarray(raw[name]), dtype=torch.float32)[None, None],
+                (CFG.image_size, CFG.image_size), mode="bilinear", align_corners=False)[0, 0]
+                for name in names])
+        s2, s1 = aligned_bands(s2_raw, S2_BANDS), aligned_bands(s1_raw, S1_BANDS)
         s2 = (s2 - TM_S2_MEAN[:, None, None]) / TM_S2_STD[:, None, None]
         s1 = (s1 - TM_S1_MEAN[:, None, None]) / TM_S1_STD[:, None, None]
         if self.training and random.random() < 0.5:
@@ -211,11 +215,12 @@ class FusionDataset(Dataset):
 
 
 class FusionExpert(torch.nn.Module):
-    def __init__(self, backbone, embedding_dim: int):
+    def __init__(self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224):
         super().__init__()
         self.backbone = backbone
         self.norm = torch.nn.LayerNorm(embedding_dim)
-        self.classifier = torch.nn.Linear(embedding_dim, len(classes))
+        self.classifier = torch.nn.Linear(embedding_dim, num_classes)
+        self.num_classes, self.image_size = num_classes, image_size
 
     def forward(self, *, s2=None, s1=None):
         inputs = {}
@@ -231,8 +236,8 @@ class FusionExpert(torch.nn.Module):
         side = math.isqrt(tokens.shape[1])
         if side * side != tokens.shape[1]:
             raise ValueError("Backbone tokens cannot be reshaped to a square evidence grid")
-        evidence = patch_logits.transpose(1, 2).reshape(tokens.shape[0], len(classes), side, side)
-        evidence = F.interpolate(evidence, (CFG.image_size, CFG.image_size), mode="bilinear", align_corners=False)
+        evidence = patch_logits.transpose(1, 2).reshape(tokens.shape[0], self.num_classes, side, side)
+        evidence = F.interpolate(evidence, (self.image_size, self.image_size), mode="bilinear", align_corners=False)
         return class_logits, evidence
 
 
@@ -246,7 +251,7 @@ backbone = BACKBONE_REGISTRY.build(backbone_name, pretrained=True,
 probe = next(iter(train_loader))
 with torch.inference_mode():
     embedding_dim = backbone({"S2L2A": probe["s2"].cuda(), "S1GRD": probe["s1"].cuda()})[-1].shape[-1]
-model = FusionExpert(backbone, embedding_dim).cuda()
+model = FusionExpert(backbone, embedding_dim, len(classes), CFG.image_size).cuda()
 del probe
 
 # %% [markdown]
@@ -320,8 +325,13 @@ for epoch in range(CFG.epochs):
         save_file({name: value.detach().cpu().contiguous() for name, value in model.state_dict().items()},
                   ARTIFACTS / "model.safetensors")
 
+# All release metrics must describe the saved best weights, not the last epoch.
+from safetensors.torch import load_file
+model.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
 ablation = {mode: evaluate(mode) for mode in ("fused", "s2", "s1")}
 (ARTIFACTS / "config.json").write_text(json.dumps({
+    "artifact_version": "satquery-pair-v2", "embedding_dim": embedding_dim,
+    "mask_supervision": "none; scene labels only", "calibrated": False,
     "architecture": "TerraMind S2L2A+S1GRD mean fusion with multilabel patch-evidence head",
     "backbone": backbone_name, "dataset_revision": CFG.dataset_revision, "config": asdict(CFG),
     "classes": classes, "s2_bands": S2_BANDS, "s1_bands": S1_BANDS,
@@ -345,10 +355,13 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-manifest = {path.name: sha256(path) for path in sorted(ARTIFACTS.iterdir()) if path.is_file()}
+manifest = {path.name: sha256(path) for path in sorted(ARTIFACTS.iterdir()) if path.is_file() and path.name != "sha256_manifest.json"}
 (ARTIFACTS / "sha256_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 if CFG.push_to_hub:
     token = os.environ.get("HF_TOKEN", "").strip()
+    if not token and Path("/kaggle/working").exists():
+        from kaggle_secrets import UserSecretsClient
+        token = UserSecretsClient().get_secret("HF_TOKEN").strip()
     if not token:
         raise RuntimeError("Add HF_TOKEN in notebook Secrets; never paste it into source.")
     api = HfApi(token=token)
@@ -365,4 +378,3 @@ print(json.dumps(gate, indent=2))
 assert all(value for key, value in gate.items() if key != "paid_endpoint_created")
 assert not gate["paid_endpoint_created"]
 print("PASS — download artifacts or verify Hub upload, save the notebook, then stop the GPU.")
-

@@ -157,12 +157,18 @@ def load_records(split: str, limit: int | None) -> list[dict]:
 
 train_records = load_records("Train", CFG.max_train_qa)
 validation_records = load_records("Val", CFG.max_validation_qa)
-train_images = {row["image_id"] for row in train_records}
-validation_images = {row["image_id"] for row in validation_records}
+# Official annotation IDs restart from zero within EACH split. They are not global image IDs.
+# SECOND filenames identify the underlying pair; checking local IDs falsely reports leakage.
+train_images = {row["filename"] for row in train_records}
+validation_images = {row["filename"] for row in validation_records}
 assert train_records and validation_records
 assert not train_images & validation_images, "Image-pair leakage between train and validation"
 print({"train_qa": len(train_records), "validation_qa": len(validation_records),
        "train_pairs": len(train_images), "validation_pairs": len(validation_images)})
+(ARTIFACTS / "split_manifest.json").write_text(json.dumps({
+    "identity": "SECOND pair filename, not split-local annotation ID",
+    "train_pairs": sorted(train_images), "validation_pairs": sorted(validation_images),
+}, indent=2), encoding="utf-8")
 
 # %% [markdown]
 # ## 3. Vocabulary, supervised dataset, and model
@@ -221,18 +227,18 @@ class ChangeDataset(Dataset):
 
 
 class ChangeExpert(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, vocabulary_size, answer_classes, pretrained=True):
         super().__init__()
-        encoder = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        encoder = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1 if pretrained else None)
         self.stem = torch.nn.Sequential(encoder.conv1, encoder.bn1, encoder.relu, encoder.maxpool,
             encoder.layer1, encoder.layer2, encoder.layer3, encoder.layer4)
         self.fuse = torch.nn.Sequential(torch.nn.Conv2d(2048, 512, 1, bias=False),
             torch.nn.BatchNorm2d(512), torch.nn.GELU(), torch.nn.Conv2d(512, 256, 3, padding=1),
             torch.nn.GELU())
-        self.embedding = torch.nn.Embedding(len(word_vocab), 256, padding_idx=0)
+        self.embedding = torch.nn.Embedding(vocabulary_size, 256, padding_idx=0)
         self.question = torch.nn.GRU(256, 256, batch_first=True, bidirectional=True)
         self.answer_head = torch.nn.Sequential(torch.nn.Linear(768, 512), torch.nn.GELU(),
-            torch.nn.Dropout(0.2), torch.nn.Linear(512, len(answer_vocab)))
+            torch.nn.Dropout(0.2), torch.nn.Linear(512, answer_classes))
         self.mask_head = torch.nn.Sequential(torch.nn.Conv2d(256, 128, 3, padding=1),
             torch.nn.GELU(), torch.nn.Conv2d(128, 1, 1))
 
@@ -267,7 +273,7 @@ train_loader = DataLoader(ChangeDataset(train_records), batch_size=CFG.batch_siz
                           num_workers=CFG.workers, pin_memory=True)
 validation_loader = DataLoader(ChangeDataset(validation_records), batch_size=CFG.batch_size, shuffle=False,
                                num_workers=CFG.workers, pin_memory=True)
-model = ChangeExpert().cuda()
+model = ChangeExpert(len(word_vocab), len(answer_vocab)).cuda()
 optimizer = torch.optim.AdamW(model.parameters(), lr=CFG.learning_rate, weight_decay=CFG.weight_decay)
 use_bf16 = torch.cuda.is_bf16_supported()
 autocast_dtype = torch.bfloat16 if use_bf16 else torch.float16
@@ -314,11 +320,25 @@ for epoch in range(CFG.epochs):
         best = metrics["validation_accuracy"]
         save_file({name: value.detach().cpu().contiguous() for name, value in model.state_dict().items()},
                   ARTIFACTS / "model.safetensors")
-        (ARTIFACTS / "config.json").write_text(json.dumps({"architecture": "shared_resnet18_gru_answer_mask",
+        (ARTIFACTS / "config.json").write_text(json.dumps({"artifact_version": "satquery-pair-v2",
+            "architecture": "shared_resnet18_gru_answer_mask", "mask_supervision": "SECOND changed semantic labels",
             "config": asdict(CFG), "word_vocab": word_vocab, "answer_vocab": answer_vocab,
             "best_metrics": metrics}, indent=2), encoding="utf-8")
 
 (ARTIFACTS / "training_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
+
+# Fresh architecture/weight reload, without downloading a second pretrained backbone.
+from safetensors.torch import load_file
+reloaded = ChangeExpert(len(word_vocab), len(answer_vocab), pretrained=False).cuda().eval()
+reloaded.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
+reload_batch = next(iter(validation_loader))
+with torch.inference_mode():
+    reload_answers, reload_masks = reloaded(reload_batch["time_a"].cuda(), reload_batch["time_b"].cuda(), reload_batch["tokens"].cuda())
+assert torch.isfinite(reload_answers).all() and torch.isfinite(reload_masks).all()
+assert reload_masks.shape[-2:] == (CFG.image_size, CFG.image_size)
+del reloaded, reload_batch, reload_answers, reload_masks
+torch.cuda.empty_cache()
+print("PASS: saved ChangeVQA weights reloaded strictly and produced finite answers/masks. Not a test-set accuracy certificate.")
 
 # %% [markdown]
 # ## 5. Hash, optional free Hub upload, and safe stop
@@ -332,11 +352,14 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-manifest = {path.name: sha256(path) for path in sorted(ARTIFACTS.iterdir()) if path.is_file()}
+manifest = {path.name: sha256(path) for path in sorted(ARTIFACTS.iterdir()) if path.is_file() and path.name != "sha256_manifest.json"}
 (ARTIFACTS / "sha256_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 if CFG.push_to_hub:
     from huggingface_hub import HfApi
     token = os.environ.get("HF_TOKEN", "").strip()
+    if not token and Path("/kaggle/working").exists():
+        from kaggle_secrets import UserSecretsClient
+        token = UserSecretsClient().get_secret("HF_TOKEN").strip()
     if not token:
         raise RuntimeError("Add HF_TOKEN to notebook Secrets; never paste it into source.")
     api = HfApi(token=token)
@@ -351,4 +374,3 @@ gate = {"weights": (ARTIFACTS / "model.safetensors").is_file(),
 print(json.dumps(gate, indent=2))
 assert gate["weights"] and gate["config"] and gate["hash_manifest"] and not gate["paid_endpoint_created"]
 print("PASS — download artifacts or verify the Hub upload, save the notebook, then stop the GPU.")
-

@@ -1,5 +1,31 @@
 # Project progress
 
+## Critical-gap implementation — 2026-09-04
+
+- Added optional learned Qwen intent proposals plus bounded dependency planning, focused step
+  prompts, mask-loss/gain measurement, exact target/method/threshold/grid checks and abstention.
+- Cartosat numeric bands are sensor-qualified; RISAT/EOS-04 polarizations, product mode and RTC
+  declarations are preserved. Complex/conflicting inputs reject safely; ISRO transfer remains unvalidated.
+- Corrected paired training/serving architecture, normalization, mask representation and artifact
+  hashes. Fixed mixed-resolution Sentinel stacking, LMDB transaction-buffer lifetime, and evaluation
+  of the wrong epoch. Optional paired runtime shares the existing Kaggle/ngrok service.
+- Real case `anl_8ab89f87856a487088742d9a6c43dd76` completed via localhost proxy → Kaggle quality-v3
+  Qwen/SAM for both Nepal dates → local baseline comparison → dependent extent tool. Six candidate
+  masks were returned. Source images lacked georeferencing, so metric area was correctly withheld.
+  Candidate counts are not verified ground truth; visual/class precision is still an open gate.
+- `/v1/plan` returned 404 at the latest live check; this case correctly records **deterministic
+  fallback**. User must run the provided live upgrade cell for learned planning. No new paired
+  checkpoint was trained or released; no learned paired GPU-forward or accuracy claim is made.
+- Local backend and frontend restarted; stale frontend PID lock pointed at an unrelated NVIDIA
+  process and was archived without stopping that process. Local readiness and website returned 200.
+- UI refined with local font stack, balanced headings, consistent panel/control corners and subtle
+  depth. Updated architecture/system/pipeline/PRD/design and [gap audit](CRITICAL_GAPS.md).
+- Verification initially passed 265 Python tests, 20 Node tests, frontend lint/type check and build;
+  final additional regression results are recorded in [Testing](TESTING.md).
+- No deployment, paid resources, token changes, local training or GitHub push.
+
+Next cloud actions: [paired expert runbook](PAIRED_EXPERT_RUNBOOK.md).
+
 ## Studio delivery — 2026-09-04
 
 - Common optical formats, explicit profiles, PNG verification and WebP/remote-v1 compatibility

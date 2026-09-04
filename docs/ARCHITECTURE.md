@@ -1,5 +1,19 @@
 # Architecture
 
+## Bounded learned-proposal extension — 2026-09-04
+
+The controller now owns a dependency DAG rather than a task-only flat list. An optional authenticated
+Qwen `/v1/plan` proposes closed-set objectives; schema/asset checks determine the executable plan.
+Missing/invalid proposals are explicitly labelled fallback. `query`, `depends_on` and `operation`
+are controller-only fields stripped from legacy remote inference payloads. Sensor profiles and
+band descriptions likewise remain compatible with the already-running strict v1 server.
+
+Target pair requests can invoke two independent grounding steps, one pair comparison and a
+dependent mask-extent measurement. See [current flow diagram and gates](CRITICAL_GAPS.md).
+Learned paired runtime artifacts use exactly the cloud-notebook class definitions, verified hashes,
+explicit spectral inputs and uncalibrated scores. Local analytical baselines remain the default
+until the separate checkpoints are trained and verified. They are not a trained change/fusion model.
+
 ## Studio extension — 2026-09-04
 
 Exploration and strict validation are separate profiles stored with each asset. WebP is repackaged

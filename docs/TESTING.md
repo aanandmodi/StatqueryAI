@@ -1,5 +1,24 @@
 # Verification and release gates
 
+## Critical-gap verification — 2026-09-04
+
+- **269 Python tests passed** (backend/ML CPU suites); **20 Node/proxy tests passed**.
+- Backend/ML/model-service Ruff checks, frontend lint, TypeScript and production build passed.
+- New coverage: compound dependency plans, invalid dependencies/tool proposals, labelled planner
+  fallback, source-qualified Cartosat bands, RISAT polarization/RTC preservation, semantic conflicts,
+  shared-valid/NDWI loss-gain support, mask/artifact count parity, notebook schema/syntax, exact
+  training/runtime architecture parity, split-local CDVQA IDs, learned WebP transport integrity,
+  read-only PIL arrays and zero shared-support rejection.
+- Real proxy → Kaggle quality-v3 test completed as case
+  `anl_8ab89f87856a487088742d9a6c43dd76`: two water segmentations, baseline comparison and dependent
+  extent measurement, six candidate masks. No metric area was inferred from unreferenced sources.
+- This case used **deterministic fallback**, not a learned planner: remote `/v1/plan` returned 404.
+  The live update cell must be run in the existing Kaggle notebook before the learned route is tested.
+- New trained ChangeVQA/TerraMind GPU inference and held-out accuracy were **not** tested. No
+  checkpoints were trained on this laptop. AST equivalence, mocked HTTP and synthetic mask tests
+  are software checks, not scientific validation. No new browser visual QA was performed.
+- Final local website, case route and readiness returned HTTP 200. Website/backend remain local.
+
 ## Report/mask quality gates
 
 `backend/tests/test_masks_and_reports.py` covers binary-mask holes, background preservation,

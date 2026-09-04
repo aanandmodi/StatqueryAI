@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import ColorInterp, Resampling
+from rasterio.enums import Resampling
 
 from app.config import Settings
 from app.errors import ModelUnavailableError
@@ -197,7 +197,11 @@ class HttpSpecialistGateway:
             files = []
             for asset in assets:
                 path = self.asset_store.resolve(asset.id)
-                if asset.metadata and asset.metadata.driver == "WEBP":
+                if (
+                    asset.metadata
+                    and asset.metadata.driver == "WEBP"
+                    and step.task in SINGLE_IMAGE_TASKS
+                ):
                     # Lossless transport derivative; keep the original hash/grid in provenance.
                     # Kaggle need not have GDAL's optional WebP driver installed.
                     with Image.open(path) as image:
@@ -216,12 +220,19 @@ class HttpSpecialistGateway:
                     )
                 )
             payload = {
-                "step": step.model_dump(mode="json"),
+                "step": step.model_dump(mode="json", exclude={"operation", "depends_on", "query"}),
                 "query": query,
                 # Keep the existing running Kaggle contract compatible. These controller-only
                 # fields remain in local provenance, not in the v1 remote Asset schema.
                 "assets": [
-                    asset.model_dump(mode="json", exclude={"input_profile", "registration_basis"})
+                    asset.model_dump(
+                        mode="json",
+                        exclude={
+                            "input_profile": True,
+                            "registration_basis": True,
+                            "metadata": {"band_descriptions", "sensor_profile"},
+                        },
+                    )
                     for asset in assets
                 ],
                 "context": context.model_dump(mode="json") if context else None,
@@ -273,9 +284,15 @@ class HttpSpecialistGateway:
                 # capability; older generic readiness contracts may omit it.
                 if "capability" in payload:
                     capability = payload["capability"]
-                    if not isinstance(capability, str) or not required_tasks.issubset(
-                        capability_tasks.get(capability, set())
+                    declared = payload.get("capabilities", [capability])
+                    if not isinstance(declared, list) or not all(
+                        isinstance(item, str) for item in declared
                     ):
+                        return False
+                    available = set().union(
+                        *(capability_tasks.get(item, set()) for item in declared)
+                    )
+                    if not required_tasks.issubset(available):
                         return False
             except (httpx.HTTPError, ValueError):
                 return False
@@ -307,35 +324,8 @@ def _scale_band(band: np.ndarray) -> np.ndarray:
 
 
 def _rgb_indexes(dataset: rasterio.io.DatasetReader) -> list[int]:
-    interpretations = list(dataset.colorinterp)
-    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
-    if all(color in interpretations for color in colors):
-        return [interpretations.index(color) + 1 for color in colors]
-    descriptions = [str(item or "").lower().strip() for item in dataset.descriptions]
-    aliases = (
-        ("red", "b04", "b4"),
-        ("green", "b03", "b3"),
-        ("blue", "b02", "b2"),
-    )
-    indexes: list[int] = []
-    for names in aliases:
-        match = next(
-            (
-                index
-                for index, description in enumerate(descriptions, start=1)
-                if description in names
-            ),
-            None,
-        )
-        if match is None:
-            indexes = []
-            break
-        indexes.append(match)
-    if indexes:
-        return indexes
-    if dataset.count >= 3:
-        return [1, 2, 3]
-    return [1, 1, 1]
+    from app.core.sensors import visual_indexes
+    return visual_indexes(dataset)
 
 
 def render_rgb_preview(path: Path, *, max_edge: int, jpeg_quality: int) -> bytes:

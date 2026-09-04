@@ -18,12 +18,15 @@
   --lime: #b5e3c7;
   --coral: #eaaa87;
   --blue: #86bed5;
-  --radius: 0.4rem;
+  --radius: 0.75rem;
+  --studio-font: 'Bahnschrift', 'Aptos', 'Segoe UI', sans-serif;
+  --studio-panel-radius: 12px;
+  --studio-control-radius: 8px;
   color-scheme: dark;
 }
 html,
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--studio-font);
   font-size: 16px;
   line-height: 1.5;
   background: #10181d;
@@ -71,7 +74,7 @@ textarea {
   color: #edf2f1;
   background: #111c22;
   border: 1px solid #405259;
-  border-radius: 5px;
+  border-radius: var(--studio-control-radius);
 }
 input,
 select {
@@ -126,7 +129,7 @@ button:hover:not(:disabled) {
 .glass-panel {
   background: #182329;
   border: 1px solid #34454c;
-  box-shadow: none;
+  box-shadow: 0 8px 24px #00000014, inset 0 1px 0 #ffffff04;
   backdrop-filter: none;
 }
 .topbar {
@@ -136,6 +139,7 @@ button:hover:not(:disabled) {
   padding: 0 26px;
   grid-template-columns: 1fr auto 1fr;
   background: #10181d;
+  box-shadow: none;
 }
 .brand {
   gap: 12px;
@@ -255,10 +259,11 @@ button:hover:not(:disabled) {
   display: block;
 }
 .heading-row h1 {
-  font-size: 30px;
-  line-height: 1.13;
-  letter-spacing: -0.04em;
-  font-weight: 500;
+  font-size: 32px;
+  line-height: 1.16;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  text-wrap: balance;
 }
 .heading-row p {
   font-size: 14px;
@@ -268,7 +273,7 @@ button:hover:not(:disabled) {
 }
 .query-card {
   padding: 20px;
-  border-radius: 6px;
+  border-radius: var(--studio-panel-radius);
   overflow: visible;
 }
 .query-card-head {
@@ -558,7 +563,7 @@ button:hover:not(:disabled) {
 .evidence-card,
 .answer-card,
 .trace-card {
-  border-radius: 6px;
+  border-radius: var(--studio-panel-radius);
   padding: 20px;
 }
 .section-label {
@@ -877,7 +882,8 @@ button:hover:not(:disabled) {
 .document-heading h1 {
   font-size: 40px;
   font-weight: 500;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
   line-height: 1.15;
   margin: 12px 0;
 }
@@ -896,7 +902,7 @@ button:hover:not(:disabled) {
 .document-panel {
   background: #182329;
   border: 1px solid #34454c;
-  border-radius: 6px;
+  border-radius: var(--studio-panel-radius);
   padding: 24px;
   min-width: 0;
 }

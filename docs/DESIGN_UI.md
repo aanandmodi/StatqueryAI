@@ -2,6 +2,13 @@
 
 ## Current studio revision — 2026-09-04
 
+Refinement: local Bahnschrift/Aptos/Segoe UI typography, calmer heading tracking, 12px panel and
+8px control tokens, subtle surface depth, and balanced headings. The charcoal/mint identity and
+untinted source imagery remain. Methods now distinguishes learned planning, deterministic fallback,
+candidate extent measurement and sensor-specific limitations. No remote font service is needed
+for the active studio font stack. Build/type checks cover this update; no new browser visual QA
+or claim of pixel-perfect rendering is made in this pass.
+
 The frosted direction below is retained as historical context and is superseded by the current
 instrument-style studio. `app/studio.css` overrides the base theme with charcoal surfaces,
 mint/cyan evidence, amber warnings, readable sans-serif and compact mono metadata. Source imagery
