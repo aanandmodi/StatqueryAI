@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -51,6 +52,27 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
             keepWithNext=True,
         )
     )
+    styles.add(
+        ParagraphStyle(
+            "SatSubHeading",
+            parent=styles["SatHeading"],
+            fontSize=10.5,
+            textColor=colors.HexColor("#2B4C7E"),
+            spaceBefore=3 * mm,
+            spaceAfter=1.5 * mm,
+            keepWithNext=True,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            "SatBullet",
+            parent=styles["SatBody"],
+            leftIndent=12,
+            firstLineIndent=-8,
+            spaceBefore=0.8 * mm,
+            spaceAfter=0.8 * mm,
+        )
+    )
     styles.add(ParagraphStyle("SatSource", parent=styles["SatBody"], keepWithNext=True))
     doc = SimpleDocTemplate(
         str(destination),
@@ -95,7 +117,7 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
             else []
         ),
         Paragraph("Answer", styles["SatHeading"]),
-        Paragraph(_escape(result.answer), styles["SatBody"]),
+        *_render_markdown_flowables(result.answer, styles),
         *[
             flowable
             for section in result.sections
@@ -103,8 +125,9 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
                 Paragraph(_escape(section.title), styles["SatHeading"]),
                 Paragraph(_escape(f"Source: {section.source}"), styles["SatSource"]),
                 *[
-                    Paragraph(_escape(paragraph), styles["SatBody"])
+                    sub_flowable
                     for paragraph in section.paragraphs
+                    for sub_flowable in _render_markdown_flowables(paragraph, styles)
                 ],
             ]
         ],
@@ -191,3 +214,128 @@ def _escape(value: str) -> str:
     return (
         value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
     )
+
+
+def _format_inline_reportlab(text: str) -> str:
+    # 1. Escape HTML special characters
+    safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # 2. Convert bold: **text** -> <b>text</b>
+    safe = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", safe)
+    # 3. Convert italic: *text* -> <i>\1</i>
+    safe = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", safe)
+    # 4. Convert code: `code` -> <font name="Courier">\1</font>
+    safe = re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', safe)
+    # 5. Status badges: [Verified], [Detected], etc.
+    safe = re.sub(
+        r"\[(Verified|Confirmed|Passed|Pass|Present)\]",
+        r'<b>[<font color="#059669">\1</font>]</b>',
+        safe,
+        flags=re.I,
+    )
+    safe = re.sub(
+        r"\[(High|Detected)\]",
+        r'<b>[<font color="#0284C7">\1</font>]</b>',
+        safe,
+        flags=re.I,
+    )
+    safe = re.sub(
+        r"\[(Moderate|Warning)\]",
+        r'<b>[<font color="#D97706">\1</font>]</b>',
+        safe,
+        flags=re.I,
+    )
+    safe = re.sub(
+        r"\[(Low|Critical|Fail|Absent)\]",
+        r'<b>[<font color="#DC2626">\1</font>]</b>',
+        safe,
+        flags=re.I,
+    )
+    # Clean any residual unformatted asterisks
+    safe = re.sub(r"\*", "", safe)
+    return safe
+
+
+def _render_markdown_flowables(text: str, styles) -> list:
+    flowables = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if not line:
+            i += 1
+            continue
+
+        # 1. Table
+        if line.startswith("|") and line.endswith("|") and line.count("|") >= 2:
+            table_lines = []
+            while (
+                i < len(lines)
+                and lines[i].strip().startswith("|")
+                and lines[i].strip().endswith("|")
+            ):
+                table_lines.append(lines[i].strip())
+                i += 1
+            if len(table_lines) >= 2:
+                rows = []
+                for idx, t_line in enumerate(table_lines):
+                    if idx == 1 and re.match(r"^\|(?:\s*:?-+:?\s*\|)+$", t_line):
+                        continue
+                    cols = [col.strip() for col in t_line.split("|")[1:-1]]
+                    rows.append(cols)
+                if rows:
+                    flowables.append(_table(rows, small=True))
+                    flowables.append(Spacer(1, 2 * mm))
+                    continue
+
+        # 2. Heading: #, ##, ###
+        if line.startswith("###"):
+            h_text = line.lstrip("#").strip()
+            flowables.append(Paragraph(_format_inline_reportlab(h_text), styles["SatSubHeading"]))
+            i += 1
+            continue
+        if line.startswith("#"):
+            h_text = line.lstrip("#").strip()
+            flowables.append(Paragraph(_format_inline_reportlab(h_text), styles["SatHeading"]))
+            i += 1
+            continue
+
+        # 3. Bullet list
+        bullet_match = re.match(r"^[-*•+]\s+(.+)$", line)
+        if bullet_match:
+            b_text = bullet_match.group(1).strip()
+            flowables.append(
+                Paragraph(f"&bull;&nbsp; {_format_inline_reportlab(b_text)}", styles["SatBullet"])
+            )
+            i += 1
+            continue
+
+        numbered_match = re.match(r"^(\d+)\.\s+(.+)$", line)
+        if numbered_match:
+            num = numbered_match.group(1)
+            b_text = numbered_match.group(2).strip()
+            flowables.append(
+                Paragraph(
+                    f"<b>{num}.</b>&nbsp; {_format_inline_reportlab(b_text)}", styles["SatBullet"]
+                )
+            )
+            i += 1
+            continue
+
+        # 4. Key-Value or Bold Label
+        kv_match = re.match(
+            r"^(?:(?:\*\*([^*:]+)\*\*)|([A-Z][A-Za-z0-9\s/_-]{1,25})):\s*(.+)$", line
+        )
+        if kv_match:
+            key = (kv_match.group(1) or kv_match.group(2)).strip()
+            val = kv_match.group(3).strip()
+            flowables.append(
+                Paragraph(f"<b>{key}:</b> {_format_inline_reportlab(val)}", styles["SatBody"])
+            )
+            i += 1
+            continue
+
+        # 5. Normal paragraph
+        flowables.append(Paragraph(_format_inline_reportlab(line), styles["SatBody"]))
+        i += 1
+
+    return flowables

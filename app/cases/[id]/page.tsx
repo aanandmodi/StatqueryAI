@@ -2,6 +2,7 @@
 import { use, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { StudioNav } from '@/components/studio-nav';
+import { StructuredAnswer } from '@/components/structured-answer';
 import { jsonRequest } from '@/lib/api-client';
 
 type Record = {
@@ -174,13 +175,13 @@ export default function CaseDetail({
           {record.result && (
             <article className="document-panel case-report">
               <h2>Visual interpretation</h2>
-              <p>{record.result.answer}</p>
+              <StructuredAnswer content={record.result.answer} className="narrative-output" />
               {record.result.sections?.map((section, index) => (
                 <section className="region-report-section" key={index}>
                   <h3>{section.title}</h3>
                   <small>{section.source}</small>
                   {section.paragraphs.map((p, i) => (
-                    <p key={i}>{p}</p>
+                    <StructuredAnswer key={i} content={p} />
                   ))}
                 </section>
               ))}

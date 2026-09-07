@@ -29,6 +29,7 @@ import {
 } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { StructuredAnswer } from '@/components/structured-answer';
 import { jsonRequest } from '@/lib/api-client';
 
 type Task =
@@ -1279,8 +1280,15 @@ export default function Home() {
               </span>
               <p>
                 {result
-                  ? result.answer.slice(0, 240) +
-                    (result.answer.length > 240 ? '…' : '')
+                  ? (() => {
+                      const clean = result.answer
+                        .replace(/^#+\s+/gm, '')
+                        .replace(/\|[^\n]+\|/g, '')
+                        .replace(/[*`_~]/g, '')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+                      return clean.slice(0, 240) + (clean.length > 240 ? '…' : '');
+                    })()
                   : 'Upload a source on the left. Candidate masks, measured coverage and source-aligned comparison appear here.'}
               </p>
               <button type="button" onClick={() => setOutputView('report')}>
@@ -1318,11 +1326,10 @@ export default function Home() {
                     : 'Your evidence-backed answer will appear here.'}
             </h2>
             {result && (
-              <div className="narrative-output">
-                {result.answer.split(/\n\s*\n/).map((paragraph, index) => (
-                  <p key={index}>{paragraph}</p>
-                ))}
-              </div>
+              <StructuredAnswer
+                content={result.answer}
+                className="narrative-output"
+              />
             )}
             {result?.sections?.map((section, index) => (
               <section
@@ -1332,7 +1339,7 @@ export default function Home() {
                 <h3>{section.title}</h3>
                 <small>{section.source}</small>
                 {section.paragraphs.map((paragraph, paragraphIndex) => (
-                  <p key={paragraphIndex}>{paragraph}</p>
+                  <StructuredAnswer key={paragraphIndex} content={paragraph} />
                 ))}
               </section>
             ))}
