@@ -61,10 +61,15 @@ class RasterValidator:
         if kind not in {"tiff", "png", "jpeg", "webp"}:
             raise ValidationFailure("Unsupported or unrecognized raster file")
         if kind != "tiff":
-            if modality != Modality.OPTICAL:
+            display_optical = modality == Modality.OPTICAL
+            aligned_sar_preview = (
+                modality == Modality.SAR and exploration and allow_image_grid
+            )
+            if not (display_optical or aligned_sar_preview):
                 raise ValidationFailure(
-                    "JPG/PNG/WebP exploration accepts optical images only. "
-                    "SAR/multispectral analysis needs original sensor TIFF data."
+                    "JPG/PNG/WebP accepts optical exploration images and explicitly aligned "
+                    "SAR display exports only. Calibrated SAR/multispectral analysis needs "
+                    "original sensor TIFF data."
                 )
             try:
                 with Image.open(path) as image:
@@ -164,6 +169,11 @@ class RasterValidator:
                         "imagery does not establish spectral calibration, species, "
                         "event time or cause."
                     )
+                    if modality == Modality.SAR and kind != "tiff":
+                        warnings.append(
+                            "Compressed SAR display export: values are display intensities, not "
+                            "calibrated backscatter; polarization and radiometry are unavailable."
+                        )
                 if not crs and kind != "tiff":
                     warnings.append(
                         "Image has no georeferencing; evidence uses pixel coordinates only. "
@@ -250,7 +260,6 @@ class RasterValidator:
 
         warnings: list[str] = []
         a, b = left.metadata, right.metadata
-<<<<<<< HEAD
         if task == TaskType.CHANGE_VQA and a and b:
 
             def semantics(metadata):
@@ -267,8 +276,6 @@ class RasterValidator:
                 raise ValidationFailure(
                     "Temporal products use different declared radiometric representations"
                 )
-=======
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
         if a and b and not a.crs and not b.crs:
             if task == TaskType.CHANGE_VQA and self._is_benchmark_pair(left, right):
                 warnings.append(
@@ -276,10 +283,12 @@ class RasterValidator:
                     "co-registration is assumed from the benchmark and not independently verified"
                 )
                 return warnings
-            if task != TaskType.CHANGE_VQA or not self._is_declared_image_grid_pair(left, right):
+            if task not in {TaskType.CHANGE_VQA, TaskType.OPTICAL_SAR_FUSION} or not (
+                self._is_declared_image_grid_pair(left, right, task)
+            ):
                 raise ValidationFailure(
-                    "Unreferenced temporal images require an explicit pixel-grid declaration "
-                    "and identical dimensions, bands and sample types"
+                    "Unreferenced paired images require an explicit pixel-grid declaration "
+                    "and compatible dimensions"
                 )
             warnings.append(
                 "Both images lack georeferencing. Pixel-for-pixel alignment was declared by the "
@@ -388,22 +397,34 @@ class RasterValidator:
         )
 
     @staticmethod
-    def _is_declared_image_grid_pair(left: AssetRecord, right: AssetRecord) -> bool:
+    def _is_declared_image_grid_pair(
+        left: AssetRecord,
+        right: AssetRecord,
+        task: TaskType,
+    ) -> bool:
         a, b = left.metadata, right.metadata
+        required_roles = (
+            {AssetRole.TIME_A, AssetRole.TIME_B}
+            if task == TaskType.CHANGE_VQA
+            else {AssetRole.OPTICAL, AssetRole.SAR}
+        )
+        temporal_samples_match = (
+            task != TaskType.CHANGE_VQA or (a and b and a.count == b.count and a.dtypes == b.dtypes)
+        )
         return bool(
             left.registration_basis == RegistrationBasis.PIXEL_GRID
             and right.registration_basis == RegistrationBasis.PIXEL_GRID
-            and {left.role, right.role} == {AssetRole.TIME_A, AssetRole.TIME_B}
+            and {left.role, right.role} == required_roles
             and a
             and b
             and not a.crs
             and not b.crs
             and a.width == b.width
             and a.height == b.height
-            and a.count == b.count
-            and a.dtypes == b.dtypes
+            and temporal_samples_match
             and a.transform == b.transform == [1, 0, 0, 0, 1, 0]
             and left.input_profile == right.input_profile
+            and left.input_profile.value == "exploration"
         )
 
     @staticmethod

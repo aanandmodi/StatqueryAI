@@ -241,3 +241,38 @@ def test_real_local_fusion_end_to_end(client):
     for item in evidence:
         assert client.get(item["artifact_url"]).status_code == 200
     assert client.get(f"/v1/analyses/{record['id']}/report").status_code == 200
+
+
+def test_aligned_display_level_optical_sar_fusion(client):
+    optical = rgb()
+    sar = np.repeat(np.mean(optical, axis=2, keepdims=True).astype("uint8"), 3, axis=2)
+    sar[8:32, 5:30] = 20
+    assets = [
+        upload(
+            client,
+            image_bytes(optical, "JPEG"),
+            "optical.jpg",
+            "optical",
+            input_profile="exploration",
+            registration_basis="pixel_grid",
+        ),
+        upload(
+            client,
+            image_bytes(sar, "JPEG"),
+            "sar-display.jpg",
+            "sar",
+            "sar",
+            input_profile="exploration",
+            registration_basis="pixel_grid",
+        ),
+    ]
+    record = analyze(client, assets, "Fuse the optical and SAR evidence")
+    assert record["status"] == "succeeded", record
+    assert record["result"]["evidence"]
+    assert set(record["result"]["provenance"]["registration_basis"].values()) == {
+        "pixel_grid"
+    }
+    assert any(
+        "display intensities" in warning
+        for warning in record["result"]["warnings"]
+    )

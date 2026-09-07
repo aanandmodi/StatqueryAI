@@ -7,7 +7,7 @@ from typing import Sequence
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import ColorInterp, Resampling
+from rasterio.enums import Resampling
 from rasterio.windows import Window
 
 
@@ -82,25 +82,8 @@ def percentile_stretch_rgb(
 
 
 def rgb_band_indexes(source: rasterio.io.DatasetReader) -> list[int]:
-<<<<<<< HEAD
     from satquery_ml.sensors import visual_indexes
     return visual_indexes(source)
-=======
-    """Use the same metadata-first visual band mapping as the Kaggle decoder."""
-    interpretations = list(source.colorinterp)
-    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
-    if all(color in interpretations for color in colors):
-        return [interpretations.index(color) + 1 for color in colors]
-    descriptions = [str(item or "").lower().strip() for item in source.descriptions]
-    aliases = (("red", "b04", "b4"), ("green", "b03", "b3"), ("blue", "b02", "b2"))
-    indexes = [
-        next((index for index, name in enumerate(descriptions, 1) if name in names), None)
-        for names in aliases
-    ]
-    if all(index is not None for index in indexes):
-        return [int(index) for index in indexes]
-    return [1, 2, 3] if source.count >= 3 else [1, 1, 1]
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 
 
 def geotiff_to_rgb_preview(

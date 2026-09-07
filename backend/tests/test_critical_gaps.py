@@ -19,8 +19,8 @@ from app.config import Settings
 from app.core.planner import IntentProposal, propose_intents
 from app.core.router import PolicyRouter
 from app.core.sensors import semantic_indexes, sensor_profile, sentinel_fusion_indexes
-from app.models.mask_comparison import compare_mask_extent
 from app.models.gateway import HttpSpecialistGateway
+from app.models.mask_comparison import compare_mask_extent
 from app.models.masks import encode_mask, materialize_masks
 from app.schemas import AssetRole, EvidenceItem, ExecutionPlan, SpecialistOutput, TaskType
 from app.storage import LocalArtifactStore
@@ -106,7 +106,10 @@ def compound_plan(make_asset, query=None):
     ]
     plan = PolicyRouter(Settings(environment="test", planner_backend="policy")).plan(
         query
-        or "Highlight the reservoir, tell me if water level dropped compared to last month, and calculate the lost area",
+        or (
+            "Highlight the reservoir, tell me if water level dropped compared to last "
+            "month, and calculate the lost area"
+        ),
         assets,
         None,
         {},
@@ -382,7 +385,8 @@ async def test_pair_webp_preserves_bytes_hash_and_legacy_step_contract(tmp_path,
     gateway.client = SimpleNamespace(post=AsyncMock(return_value=response))
     await gateway.infer(plan.steps[2], assets, "test query")
     call = gateway.client.post.call_args.kwargs
-    # Closed handles are acceptable; multipart descriptors still prove original paths vs PNG buffers.
+    # Closed handles are acceptable; multipart descriptors still prove original paths
+    # were used instead of PNG buffers.
     assert all(part[1][1].name == str(path) for part in call["files"])
     payload = json.loads(call["data"]["payload"])
     assert all(asset["sha256"] == hashlib.sha256(raw).hexdigest() for asset in payload["assets"])

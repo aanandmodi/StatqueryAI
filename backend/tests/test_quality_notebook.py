@@ -13,20 +13,14 @@ from rasterio.enums import Resampling
 from rasterio.io import MemoryFile
 from test_notebook_runtime import _functions
 
-from app.models.masks import decode_mask
-<<<<<<< HEAD
 from app.core.sensors import semantic_indexes
-=======
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
+from app.models.masks import decode_mask
 
 PATCH = Path(__file__).resolve().parents[2] / "notebooks/patches/quality_upgrade.py"
 
 
 def functions(*names, **namespace):
-<<<<<<< HEAD
     namespace.setdefault("semantic_indexes", semantic_indexes)
-=======
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
     tree = ast.parse(PATCH.read_text(encoding="utf-8"))
     nodes = [
         node

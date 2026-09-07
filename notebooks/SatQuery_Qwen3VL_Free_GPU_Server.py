@@ -195,7 +195,6 @@ def scale_band(band: np.ndarray) -> np.ndarray:
     return (output * 255).round().astype(np.uint8)
 
 
-<<<<<<< HEAD
 
 
 # BEGIN SENSOR PROFILE RUNTIME
@@ -353,25 +352,6 @@ def sentinel_fusion_indexes(optical, sar):
 # END SENSOR PROFILE RUNTIME
 def rgb_band_indexes(source: Any) -> list[int]:
     return visual_indexes(source)
-=======
-def rgb_band_indexes(source: Any) -> list[int]:
-    """Prefer declared RGB metadata; never assume an unlabeled Sentinel band order."""
-    interpretations = list(source.colorinterp)
-    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
-    if all(color in interpretations for color in colors):
-        return [interpretations.index(color) + 1 for color in colors]
-    descriptions = [str(item or "").lower().strip() for item in source.descriptions]
-    aliases = (("red", "b04", "b4"), ("green", "b03", "b3"), ("blue", "b02", "b2"))
-    indexes = [
-        next((index for index, name in enumerate(descriptions, 1) if name in names), None)
-        for names in aliases
-    ]
-    if all(index is not None for index in indexes):
-        return [int(index) for index in indexes]
-    # With no mapping, use the first three bands as a preview, not a calibrated RGB product.
-    # A 1–2 band SAR raster becomes a grayscale preview; Qwen does not receive raw SAR physics.
-    return [1, 2, 3] if source.count >= 3 else [1, 1, 1]
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 
 
 def decode_uploaded_image(payload: bytes) -> Image.Image:
@@ -768,15 +748,7 @@ def quality_decode(data):
         else:
             rgb = np.stack([scale_band(band) for band in raw], axis=-1)
         rgb[~valid] = 0
-<<<<<<< HEAD
         declared_rgb = semantic_indexes(source, ["red", "green", "blue"]) is not None
-=======
-        interpretations = list(source.colorinterp)
-        named = [str(name or "").lower().strip() for name in source.descriptions]
-        declared_rgb = all(color in interpretations for color in (ColorInterp.red, ColorInterp.green, ColorInterp.blue))
-        declared_rgb |= all(any(name in names for name in named) for names in
-                            (("red", "b04", "b4"), ("green", "b03", "b3"), ("blue", "b02", "b2")))
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
         info = {"width": source.width, "height": source.height, "band_indexes": indexes,
                 "declared_rgb": bool(declared_rgb), "mask_grid": [width, height]}
     return Image.fromarray(rgb), valid, info
@@ -979,7 +951,6 @@ print("Loading these models is not evidence of mask accuracy. Inspect real satel
 
 
 # %% [markdown]
-<<<<<<< HEAD
 # ## 6c. Learned intent planning
 # No model retraining or new tunnel. Bounded JSON proposals only.
 
@@ -1059,8 +1030,6 @@ print("Backend auto-planning will record learned-intent when this route passes; 
 
 
 # %% [markdown]
-=======
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 # ## 7. Verify the local HTTP contract before exposing it
 #
 # The TIFF has an explicitly synthetic test georeference, not a claimed satellite location.

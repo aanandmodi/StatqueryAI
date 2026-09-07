@@ -15,10 +15,7 @@ from app.core.scene_report import build_scene_sections
 from app.core.validation import RasterValidator
 from app.errors import ConflictError, SatQueryError
 from app.models.gateway import SpecialistGateway
-<<<<<<< HEAD
 from app.models.mask_comparison import compare_mask_extent
-=======
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 from app.models.masks import materialize_masks, spectral_water_output
 from app.reporting import build_pdf_report
 from app.repository import SQLiteRepository
@@ -220,20 +217,6 @@ class AnalysisService:
                             output,
                             step,
                             task_assets[step.step_id],
-<<<<<<< HEAD
-=======
-                            record.request.query,
-                            record.request.context,
-                        ),
-                        timeout=self.settings.model_timeout_seconds,
-                    )
-                    if not output.model_version.startswith("demo-simulator"):
-                        output = await asyncio.to_thread(
-                            spectral_water_output,
-                            output,
-                            step,
-                            task_assets[step.step_id],
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
                             self.asset_store,
                         )
                     outputs.append(output)

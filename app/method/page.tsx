@@ -46,13 +46,9 @@ export default function Methods() {
                 <td>Two dates</td>
                 <td>
                   Local normalized selected-band difference; shared-valid pixel
-<<<<<<< HEAD
                   masks by default. Optional trained CDVQA/SECOND expert uses
                   a learned paired encoder and supervised change head. Target
                   extent requests chain two segmentations and a separate measurement.
-=======
-                  masks.
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
                 </td>
                 <td>Where values differ above a declared threshold.</td>
                 <td>
@@ -64,12 +60,8 @@ export default function Methods() {
                 <td>Optical + SAR</td>
                 <td>
                   Local color/texture + relative backscatter proxy, masks on the
-<<<<<<< HEAD
                   optical reference by default. A separately trained TerraMind
                   expert can provide learned Sentinel-1/2 scene labels—not precision masks.
-=======
-                  optical reference.
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
                 </td>
                 <td>Inspectible complementary signal candidates.</td>
                 <td>
@@ -83,7 +75,6 @@ export default function Methods() {
       </section>
       <div className="document-grid">
         <section className="document-panel">
-<<<<<<< HEAD
           <h2>Plans you can audit</h2>
           <p>
             The Kaggle instruction model can propose multiple objectives. The
@@ -111,8 +102,6 @@ export default function Methods() {
           </p>
         </section>
         <section className="document-panel">
-=======
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
           <h2>Image requirements</h2>
           <ul>
             <li>

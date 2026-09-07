@@ -235,8 +235,7 @@ export default function Home() {
   const [maskOpacity, setMaskOpacity] = useState(0.8);
   const displayFormats =
     inputProfile === 'exploration' &&
-    inputMode !== 'fusion' &&
-    modality === 'optical';
+    (inputMode === 'fusion' || modality === 'optical');
   const acceptedFiles = displayFormats
     ? '.tif,.tiff,.jpg,.jpeg,.png,.webp'
     : '.tif,.tiff,image/tiff';
@@ -462,11 +461,11 @@ export default function Home() {
         form.append('role', role);
         form.append(
           'input_profile',
-          inputMode === 'fusion' ? 'strict' : inputProfile,
+          inputProfile,
         );
         form.append(
           'registration_basis',
-          inputMode === 'temporal' && pixelAligned
+          requiresPair && pixelAligned
             ? 'pixel_grid'
             : 'geospatial',
         );
@@ -676,8 +675,8 @@ export default function Home() {
               <label htmlFor="input-profile">Input profile</label>
               <select
                 id="input-profile"
-                value={inputMode === 'fusion' ? 'strict' : inputProfile}
-                disabled={busy || inputMode === 'fusion'}
+                value={inputProfile}
+                disabled={busy}
                 onChange={(e) => {
                   setInputProfile(e.target.value as 'strict' | 'exploration');
                   clearFile();
@@ -691,7 +690,9 @@ export default function Home() {
             </div>
             <p className="field-note">
               {inputMode === 'fusion'
-                ? 'Use genuine optical and SAR sensor rasters, not two RGB photos.'
+                ? inputProfile === 'exploration'
+                  ? 'Accepts a documented, co-registered optical/SAR display pair. Results use relative image intensity only—no calibrated backscatter or metric area.'
+                  : 'Use genuine georeferenced optical and calibrated SAR sensor rasters, not two RGB photos.'
                 : inputProfile === 'exploration'
                   ? 'RGB or grayscale images. Not the graded SIH benchmark profile. A photo without georeferencing cannot establish area or location.'
                   : 'Preserves the geospatial input contract. Non-TIFF benchmarks use the controlled API import.'}
@@ -859,7 +860,7 @@ export default function Home() {
                 <X size={15} /> Remove evidence set
               </button>
             )}
-            {inputMode === 'temporal' && (
+            {requiresPair && inputProfile === 'exploration' && (
               <label
                 className="pixel-grid-consent"
                 aria-label="Confirm pixel-for-pixel alignment"
@@ -873,9 +874,9 @@ export default function Home() {
                 <span>
                   <strong>These images are aligned pixel-for-pixel</strong>
                   <small>
-                    For matching exports without georeferencing. Matching size
-                    alone is not proof of alignment. No geographic area will be
-                    claimed.
+                    For documented paired exports without georeferencing.
+                    Matching size alone is not proof of alignment. No geographic
+                    area or calibrated SAR value will be claimed.
                   </small>
                 </span>
               </label>

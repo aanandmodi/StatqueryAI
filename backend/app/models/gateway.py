@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import ColorInterp, Resampling
+from rasterio.enums import Resampling
 
 from app.config import Settings
 from app.errors import ModelUnavailableError
@@ -197,15 +197,11 @@ class HttpSpecialistGateway:
             files = []
             for asset in assets:
                 path = self.asset_store.resolve(asset.id)
-<<<<<<< HEAD
                 if (
                     asset.metadata
                     and asset.metadata.driver == "WEBP"
                     and step.task in SINGLE_IMAGE_TASKS
                 ):
-=======
-                if asset.metadata and asset.metadata.driver == "WEBP":
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
                     # Lossless transport derivative; keep the original hash/grid in provenance.
                     # Kaggle need not have GDAL's optional WebP driver installed.
                     with Image.open(path) as image:
@@ -229,7 +225,6 @@ class HttpSpecialistGateway:
                 # Keep the existing running Kaggle contract compatible. These controller-only
                 # fields remain in local provenance, not in the v1 remote Asset schema.
                 "assets": [
-<<<<<<< HEAD
                     asset.model_dump(
                         mode="json",
                         exclude={
@@ -238,9 +233,6 @@ class HttpSpecialistGateway:
                             "metadata": {"band_descriptions", "sensor_profile"},
                         },
                     )
-=======
-                    asset.model_dump(mode="json", exclude={"input_profile", "registration_basis"})
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
                     for asset in assets
                 ],
                 "context": context.model_dump(mode="json") if context else None,
@@ -292,7 +284,6 @@ class HttpSpecialistGateway:
                 # capability; older generic readiness contracts may omit it.
                 if "capability" in payload:
                     capability = payload["capability"]
-<<<<<<< HEAD
                     declared = payload.get("capabilities", [capability])
                     if not isinstance(declared, list) or not all(
                         isinstance(item, str) for item in declared
@@ -303,12 +294,6 @@ class HttpSpecialistGateway:
                     )
                     if not required_tasks.issubset(available):
                         return False
-=======
-                    if not isinstance(capability, str) or not required_tasks.issubset(
-                        capability_tasks.get(capability, set())
-                    ):
-                        return False
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
             except (httpx.HTTPError, ValueError):
                 return False
         return True
@@ -339,40 +324,8 @@ def _scale_band(band: np.ndarray) -> np.ndarray:
 
 
 def _rgb_indexes(dataset: rasterio.io.DatasetReader) -> list[int]:
-<<<<<<< HEAD
     from app.core.sensors import visual_indexes
     return visual_indexes(dataset)
-=======
-    interpretations = list(dataset.colorinterp)
-    colors = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
-    if all(color in interpretations for color in colors):
-        return [interpretations.index(color) + 1 for color in colors]
-    descriptions = [str(item or "").lower().strip() for item in dataset.descriptions]
-    aliases = (
-        ("red", "b04", "b4"),
-        ("green", "b03", "b3"),
-        ("blue", "b02", "b2"),
-    )
-    indexes: list[int] = []
-    for names in aliases:
-        match = next(
-            (
-                index
-                for index, description in enumerate(descriptions, start=1)
-                if description in names
-            ),
-            None,
-        )
-        if match is None:
-            indexes = []
-            break
-        indexes.append(match)
-    if indexes:
-        return indexes
-    if dataset.count >= 3:
-        return [1, 2, 3]
-    return [1, 1, 1]
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
 
 
 def render_rgb_preview(path: Path, *, max_edge: int, jpeg_quality: int) -> bytes:

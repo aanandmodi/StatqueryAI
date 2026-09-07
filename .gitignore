@@ -41,7 +41,8 @@ yarn-error.log*
 next-env.d.ts
 /dist/
 /.wrangler/
-/outputs/
+/outputs/*
+!/outputs/benchmarks/
 /tmp/pdfs/
 /work/
 /backend/data/

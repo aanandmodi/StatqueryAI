@@ -233,17 +233,10 @@ def test_reprojection_preserves_internal_dataset_mask(tmp_path: Path) -> None:
         ((ColorInterp.undefined,) * 4, (None,) * 4, [1, 2, 3]),
         (
             (ColorInterp.green, ColorInterp.blue, ColorInterp.undefined, ColorInterp.red),
-<<<<<<< HEAD
             ("green", "blue", "nir", "red"),
             [4, 1, 2],
         ),
         ((ColorInterp.undefined,) * 4, ("blue", "green", "red", "nir"), [3, 2, 1]),
-=======
-            ("red", "green", "blue", "nir"),
-            [4, 1, 2],
-        ),
-        ((ColorInterp.undefined,) * 4, (" B02 ", " B03 ", " B04 ", "nir"), [3, 2, 1]),
->>>>>>> 2f620623f8897788bd2df2ce4f5700cb183d84f8
     ],
 )
 def test_pair_visual_bands_match_decoder_metadata_and_fallback(

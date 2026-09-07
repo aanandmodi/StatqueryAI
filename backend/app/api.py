@@ -84,9 +84,15 @@ async def capabilities(request: Request) -> dict[str, Any]:
     return {
         "tasks": state.gateway.supported_tasks(),
         "formats": {
-            "primary": ["GeoTIFF", "TIFF"],
-            "benchmark_only": ["PNG", "JPEG"],
+            "strict_geospatial": ["GeoTIFF", "TIFF"],
             "exploration_optical": ["TIFF", "PNG", "JPEG", "WebP"],
+            "exploration_sar_display": ["TIFF", "PNG", "JPEG", "WebP"],
+        },
+        "format_notes": {
+            "exploration_sar_display": (
+                "Requires an explicitly attested pixel-aligned optical/SAR pair; display "
+                "intensities are not calibrated backscatter."
+            )
         },
         "limits": {
             "upload_bytes": state.settings.max_upload_bytes,
@@ -106,7 +112,10 @@ async def capabilities(request: Request) -> dict[str, Any]:
 )
 async def upload_asset(
     request: Request,
-    file: Annotated[UploadFile, File(description="GeoTIFF/TIFF remote-sensing image")],
+    file: Annotated[
+        UploadFile,
+        File(description="TIFF/GeoTIFF or a bounded exploration PNG/JPEG/WebP image"),
+    ],
     modality: Annotated[Modality, Form()],
     role: Annotated[AssetRole, Form()] = AssetRole.PRIMARY,
     registration_basis: Annotated[RegistrationBasis, Form()] = RegistrationBasis.GEOSPATIAL,
@@ -121,9 +130,11 @@ async def upload_asset(
     if registration_basis == RegistrationBasis.PIXEL_GRID and role not in {
         AssetRole.TIME_A,
         AssetRole.TIME_B,
+        AssetRole.OPTICAL,
+        AssetRole.SAR,
     }:
         raise ValidationFailure(
-            "Image-grid registration may only be declared for a bi-temporal pair"
+            "Image-grid registration may only be declared for a temporal or optical/SAR pair"
         )
     stored = await state.asset_store.save_upload(file)
     metadata = None
