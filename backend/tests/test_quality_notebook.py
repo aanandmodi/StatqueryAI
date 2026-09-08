@@ -93,12 +93,16 @@ def test_report_and_masks_have_separate_provenance():
         BASE_REVISION="base-sha",
         SAM_REPO="sam",
         SAM_REVISION="sam-sha",
+        SEGMENTATION_REPO="semantic",
+        SEGMENTATION_REVISION="semantic-sha",
         context_text=lambda _: "",
+        quality_guard_narrative=lambda text: (text, []),
         quality_decode=lambda _: (
             Image.new("RGB", (64, 64)),
             np.ones((64, 64), bool),
             {"declared_rgb": True},
         ),
+        quality_semantic_mask=lambda *_: None,
         quality_generate=Mock(
             side_effect=["forest, water", "A longer spatial explanation.", "NONE"]
         ),
@@ -116,6 +120,75 @@ def test_report_and_masks_have_separate_provenance():
     assert any("no mask was invented" in text for text in result["warnings"])
     assert result["facts"][0]["model"] == "adapter@sha"
     assert result["facts"][1]["adapter_enabled"] is False
+
+
+def test_supported_land_cover_uses_whole_scene_semantic_mask_before_qwen_sam():
+    import base64
+
+    semantic_mask = np.zeros((64, 64), dtype=bool)
+    semantic_mask[8:40, 12:52] = True
+    generator = Mock(side_effect=["water is visible", "A bounded evidence report."])
+    namespace = functions(
+        "quality_png",
+        "quality_analyze",
+        base64=base64,
+        io=io,
+        np=np,
+        Image=Image,
+        QUALITY_VERSION="satquery-quality-v4",
+        QUALITY_MAX_TOKENS=768,
+        QUALITY_MAX_TARGETS=3,
+        QUALITY_MAX_BOXES=4,
+        MODEL_VERSION="adapter@sha",
+        BASE_MODEL="qwen",
+        BASE_REVISION="base-sha",
+        SAM_REPO="sam",
+        SAM_REVISION="sam-sha",
+        SEGMENTATION_REPO="semantic",
+        SEGMENTATION_REVISION="semantic-sha",
+        context_text=lambda _: "",
+        quality_guard_narrative=lambda text: (text, []),
+        quality_decode=lambda _: (
+            Image.new("RGB", (64, 64)),
+            np.ones((64, 64), bool),
+            {"declared_rgb": True},
+        ),
+        quality_generate=generator,
+        quality_semantic_mask=lambda *_: (semantic_mask, 0.83, ["water"]),
+        parse_boxes=Mock(side_effect=AssertionError("Qwen boxes must not run")),
+    )
+    contract = SimpleNamespace(
+        query="Outline water",
+        context=None,
+        assets=[SimpleNamespace(id="ast_a", modality="optical")],
+        step=SimpleNamespace(permitted_params={"targets": ["water"]}),
+    )
+
+    result = namespace["quality_analyze"](b"bytes", "grounding", contract)
+
+    assert len(result["evidence"]) == 1
+    evidence = result["evidence"][0]
+    assert evidence["label"] == "water candidate (LoveDA SegFormer)"
+    assert evidence["score"] == 0.59  # uncalibrated transfer score remains capped
+    assert evidence["geometry"]["method"] == "whole-scene LoveDA SegFormer semantic classes"
+    assert np.array_equal(semantic_mask, decode_mask(evidence["geometry"]))
+    assert generator.call_count == 2
+
+
+def test_narrative_guard_removes_assertions_but_preserves_explicit_limits():
+    namespace = functions("quality_guard_narrative", re=__import__("re"))
+    guarded, removed = namespace["quality_guard_narrative"](
+        "## Water\n\nThe channel has shallow water and consistent flow. "
+        "Water depth cannot be established from this image. "
+        "A paved road is visible beside it."
+    )
+
+    assert "shallow" not in guarded
+    assert "consistent flow" not in guarded
+    assert "paved road" not in guarded
+    assert "Water depth cannot be established" in guarded
+    assert "## Guarded attributes" in guarded
+    assert len(removed) == 2
 
 
 def test_updated_notebook_is_valid_and_embeds_identical_patch():

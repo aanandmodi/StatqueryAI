@@ -2,6 +2,11 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: Python 3
 #     language: python
@@ -13,8 +18,9 @@
 #
 # Use this notebook after training. It downloads the exact public adapter and immutable base
 # revision, reconstructs a leakage-safe BigEarthNet.txt validation/test subset, evaluates every
-# supported task, and exports predictions plus metrics. It performs **no training** and provisions
-# **no paid endpoint**. Run on a free Kaggle/Colab GPU; stop the GPU after the final PASS cell.
+# supported task, compares the pinned base against base+LoRA on the exact same inputs, and exports
+# raw predictions plus real generation scores. It performs **no training** and provisions **no
+# paid endpoint**. Run on a free Kaggle/Colab GPU; stop the GPU after the final PASS cell.
 
 # %% [markdown]
 # ## 0. Install the pinned evaluation environment
@@ -44,7 +50,9 @@ print("Installed. Restart the runtime once only if a later import reports a cach
 # ## 1. Configuration
 #
 # `validation` is the repeatable development benchmark. Run `test` once for the final report.
-# The default 120 examples matches the release smoke evaluation and fits a free T4 session.
+# The default 200 examples is a bounded evidence run that fits a free T4 session. Each example is
+# evaluated twice without loading a second copy of the model: PEFT temporarily disables the adapter
+# for the base pass.
 
 # %%
 from dataclasses import dataclass
@@ -63,7 +71,7 @@ class Config:
     image_repo: str = "hackelle/BigEarthNetV2-Lithuania-Summer-LMDB"
     image_revision: str = "7a83ae701109ec232d40665b9677fc46310a1a8b"
     split: str = "validation"  # validation or test
-    rows_per_type: int = 30
+    rows_per_type: int = 50
     seed: int = 42
     image_size: int = 448
     max_new_tokens: int = 128
@@ -258,8 +266,7 @@ model = PeftModel.from_pretrained(base, CFG.adapter_repo, revision=CFG.adapter_r
 model.eval()
 
 
-@torch.inference_mode()
-def predict(image: Image.Image, question: str) -> str:
+def prepared_inputs(image: Image.Image, question: str):
     messages = [{"role": "user", "content": [
         {"type": "image", "image": image}, {"type": "text", "text": question},
     ]}]
@@ -267,13 +274,54 @@ def predict(image: Image.Image, question: str) -> str:
     image_inputs, video_inputs = process_vision_info(messages)
     batch = processor(text=[prompt], images=image_inputs, videos=video_inputs, return_tensors="pt")
     batch = {key: value.to(model.device) for key, value in batch.items()}
-    output = model.generate(**batch, max_new_tokens=CFG.max_new_tokens, do_sample=False, use_cache=True)
-    generated = output[:, batch["input_ids"].shape[1]:]
-    return processor.batch_decode(generated, skip_special_tokens=True)[0].strip()
+    return batch
+
+
+@torch.inference_mode()
+def generate_scored(batch) -> tuple[str, float, float]:
+    output = model.generate(
+        **batch,
+        max_new_tokens=CFG.max_new_tokens,
+        do_sample=False,
+        use_cache=True,
+        return_dict_in_generate=True,
+        output_scores=True,
+    )
+    generated = output.sequences[:, batch["input_ids"].shape[1]:]
+    text = processor.batch_decode(generated, skip_special_tokens=True)[0].strip()
+    transition = model.compute_transition_scores(
+        output.sequences, output.scores, normalize_logits=True
+    )[0]
+    # This is a real generation statistic, not a calibrated correctness probability.
+    mean_log_probability = float(transition.mean().item()) if transition.numel() else -20.0
+    sequence_confidence = float(np.clip(np.exp(mean_log_probability), 1e-6, 1 - 1e-6))
+    sequence_logit = float(np.log(sequence_confidence / (1 - sequence_confidence)))
+    return text, sequence_confidence, sequence_logit
+
+
+def predict_base_and_lora(image: Image.Image, question: str) -> dict[str, float | str]:
+    batch = prepared_inputs(image, question)
+    lora_pred, lora_confidence, lora_logit = generate_scored(batch)
+    with model.disable_adapter():
+        base_pred, base_confidence, base_logit = generate_scored(batch)
+    return {
+        "base_pred": base_pred,
+        "base_sequence_confidence": base_confidence,
+        "base_sequence_logit": base_logit,
+        "lora_pred": lora_pred,
+        "lora_sequence_confidence": lora_confidence,
+        "lora_sequence_logit": lora_logit,
+    }
 
 
 smoke = frame.iloc[0]
-print({"question": str(smoke.input), "reference": reference_answer(smoke), "prediction": predict(images.rgb(str(smoke.patch_id)), convert_question(str(smoke.input)))})
+print({
+    "question": str(smoke.input),
+    "reference": reference_answer(smoke),
+    **predict_base_and_lora(
+        images.rgb(str(smoke.patch_id)), convert_question(str(smoke.input))
+    ),
+})
 
 # %% [markdown]
 # ## 6. Full bounded evaluation
@@ -316,26 +364,45 @@ def token_f1(prediction: str, reference: str) -> float:
     return 0.0 if not common else 2 * (common / len(pred)) * (common / len(ref)) / ((common / len(pred)) + (common / len(ref)))
 
 
+def score_prediction(prediction: str, reference: str, task_type: str):
+    exact, box_score, caption_score = int(normalize(prediction) == normalize(reference)), None, None
+    if task_type == "bounding box":
+        predicted_box, reference_box = parse_box(prediction), parse_box(reference)
+        box_score = iou(predicted_box, reference_box) if predicted_box and reference_box else 0.0
+        exact = int(box_score >= 0.5)
+    elif task_type == "captioning":
+        caption_score = token_f1(prediction, reference)
+    return exact, box_score, caption_score
+
+
 records = []
 for _, row in tqdm(frame.iterrows(), total=len(frame)):
     question = convert_question(str(row.input).strip())
     reference = reference_answer(row)
-    prediction = predict(images.rgb(str(row.patch_id)), question)
-    exact, box_score, caption_score = int(normalize(prediction) == normalize(reference)), None, None
-    if row.type == "bounding box":
-        predicted_box, reference_box = parse_box(prediction), parse_box(reference)
-        box_score = iou(predicted_box, reference_box) if predicted_box and reference_box else 0.0
-        exact = int(box_score >= 0.5)
-    elif row.type == "captioning":
-        caption_score = token_f1(prediction, reference)
+    compared = predict_base_and_lora(images.rgb(str(row.patch_id)), question)
+    base_correct, base_iou, base_caption_f1 = score_prediction(
+        str(compared["base_pred"]), reference, str(row.type)
+    )
+    lora_correct, lora_iou, lora_caption_f1 = score_prediction(
+        str(compared["lora_pred"]), reference, str(row.type)
+    )
     records.append({
         "id": int(row.ID), "patch_id": str(row.patch_id), "type": str(row.type),
-        "question": question, "reference": reference, "prediction": prediction,
-        "correct": exact, "iou": box_score, "caption_token_f1": caption_score,
+        "question": question, "reference": reference,
+        **compared,
+        "base_correct": base_correct,
+        "base_iou": base_iou,
+        "base_caption_token_f1": base_caption_f1,
+        "lora_correct": lora_correct,
+        "lora_iou": lora_iou,
+        "lora_caption_token_f1": lora_caption_f1,
     })
 
 predictions = pd.DataFrame(records)
 predictions.to_json(OUTPUT_DIR / f"{CFG.split}_predictions.jsonl", orient="records", lines=True)
+vqa = predictions.type.isin(["binary", "mcq"])
+grounding = predictions.type == "bounding box"
+captioning = predictions.type == "captioning"
 summary = {
     "adapter_revision": CFG.adapter_revision,
     "base_revision": CFG.base_revision,
@@ -343,11 +410,22 @@ summary = {
     "image_dataset_revision": CFG.image_revision,
     "split": CFG.split,
     "rows": len(predictions),
-    "vqa_exact_match": float(predictions[predictions.type.isin(["binary", "mcq"])].correct.mean()),
-    "grounding_mean_iou": float(predictions[predictions.type == "bounding box"].iou.mean()),
-    "grounding_accuracy_iou_0_5": float(predictions[predictions.type == "bounding box"].correct.mean()),
-    "caption_token_f1": float(predictions[predictions.type == "captioning"].caption_token_f1.mean()),
-    "confidence_semantics": "No calibrated probability was calculated.",
+    "base": {
+        "vqa_exact_match": float(predictions.loc[vqa, "base_correct"].mean()),
+        "grounding_mean_iou": float(predictions.loc[grounding, "base_iou"].mean()),
+        "grounding_accuracy_iou_0_5": float(predictions.loc[grounding, "base_correct"].mean()),
+        "caption_token_f1": float(predictions.loc[captioning, "base_caption_token_f1"].mean()),
+    },
+    "lora": {
+        "vqa_exact_match": float(predictions.loc[vqa, "lora_correct"].mean()),
+        "grounding_mean_iou": float(predictions.loc[grounding, "lora_iou"].mean()),
+        "grounding_accuracy_iou_0_5": float(predictions.loc[grounding, "lora_correct"].mean()),
+        "caption_token_f1": float(predictions.loc[captioning, "lora_caption_token_f1"].mean()),
+    },
+    "confidence_semantics": (
+        "sequence_confidence is an observed generation statistic, not a correctness probability. "
+        "Use scripts/score-real-evaluation.py for held-out temperature scaling and bootstrap CIs."
+    ),
 }
 (OUTPUT_DIR / f"{CFG.split}_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 print(json.dumps(summary, indent=2))
@@ -381,4 +459,3 @@ print(json.dumps(gate, indent=2))
 assert all(value for key, value in gate.items() if key != "paid_endpoint_created")
 assert gate["paid_endpoint_created"] is False
 print("PASS — evaluation complete. Download outputs, save the notebook version, and stop the GPU.")
-

@@ -1,9 +1,10 @@
-# Analysis quality v3: detailed reports and candidate pixel masks
+# Analysis quality v4: class-aware reports and candidate pixel masks
 
-Updated 2026-09-04: the maintained 6b cell now requests six evidence categories, avoids anchoring
-the narrative on the short-answer adapter and excludes unsupported species/soil/velocity/date/cause
-claims. Local routing avoids duplicate report calls. The display guard is not a general verifier.
-The actual JPEG GPU test used the user's running v2; v3 is prepared but not yet GPU-tested.
+Updated 2026-09-08: the maintained 6b cell now requests six evidence categories and uses a
+whole-scene LoveDA SegFormer transfer baseline for supported land-cover classes. This addresses the
+failure where SAM precisely traced a semantically wrong Qwen proposal. Qwen + SAM remains a
+fallback for unsupported targets. The display guard is not a general verifier, and v4 is prepared
+but not yet GPU-tested on the user's running Kaggle session.
 See [Studio guide](STUDIO_GUIDE.md) for common formats and new pages.
 
 This is a local-first, zero-paid-infrastructure upgrade. It is **not a claim of perfect accuracy**.
@@ -28,10 +29,12 @@ flowchart TD
     B --> C[Kaggle: released Qwen LoRA short observation]
     C --> D[Base Qwen3-VL instruction report; adapter temporarily disabled]
     B --> E{Grounding request?}
-    E -->|RGB / optical| F[Base Qwen target box proposals]
+    E -->|Supported land-cover class| S[Whole-scene LoveDA SegFormer mask]
+    E -->|Other RGB / optical object| F[Base Qwen target box proposals]
     F --> G[SAM 2.1 tiny candidate masks]
     E -->|Water + named green/NIR bands| H[Local NDWI candidate mask]
-    G --> I[Validate binary PNG, grid, asset ownership; exclude no-data]
+    S --> I[Validate binary PNG, grid, asset ownership; exclude no-data]
+    G --> I
     H --> I
     I --> J[Computed coverage and projected-grid area]
     D --> K[Numeric-claim display guard + structured report]
@@ -44,6 +47,10 @@ flowchart TD
 - Adapter: `aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora` at `ed12e59e0def9468bdf4a226789fc1b77c7900e7`.
 - Narrative and target proposals: `Qwen/Qwen3-VL-2B-Instruct` at `89644892e4d85e24eaac8bacfd4f463576704203`, using the already loaded base with PEFT's adapter disabled temporarily. This is **not presented as improved performance of the fine-tuned adapter**.
 - Boundary refinement: `facebook/sam2.1-hiera-tiny` at `de431c4043854a71d8101e17995dfe596bf101a5`. Additional GPU weights, on Kaggle only. No API key besides the existing notebook secrets is added.
+- Whole-scene semantic transfer baseline: `wu-pr-gw/segformer-b2-finetuned-with-LoveDA` at
+  `5c74556c08bebb5f45f50b6f78f61a62c5d220c7`. It supplies background, building, road, water,
+  barren, forest and agriculture classes. The publisher provides no model card or declared license,
+  so this checkpoint is experimental and must be replaced by the user-owned evaluated artifact.
 - SAM is promptable segmentation, **not a water classifier**. Wrong Qwen proposals can produce wrong water masks. No proposal means no invented fallback mask. At most 3 target classes and 4 proposals per class are processed.
 - SAR is excluded from the RGB SAM path. SAR segmentation requires a validated specialist.
 
@@ -79,11 +86,12 @@ The supplied `sample.tif` has 3 unnamed bands, so NDWI correctly remains unavail
 1. Keep the model loaded. Do not rerun training or section 3.
 2. If section 10 is occupying the kernel, interrupt that waiting cell. It shuts down the attended
    tunnel/API by design; this does not remove the loaded model. Run section 6 again to start the API.
-3. Insert one code cell **immediately after section 6** and paste the complete contents of
-   `notebooks/patches/quality_upgrade.py`. Run it once. It loads SAM 2 on the Kaggle GPU and updates
-   the existing inference/ready routes without exposing credentials. Before switching the handler,
-   it requires a successful SAM GPU forward pass on the synthetic smoke image (not an accuracy test).
-4. Run section 7. It must return HTTP 200 with `quality_pipeline` = `satquery-quality-v3` in the
+3. Insert one code cell **immediately after section 6** in the same currently running notebook and
+   paste the complete contents of `notebooks/patches/quality_upgrade.py`. Do not open the separate
+   live-patch notebook as a new Kaggle session: notebooks do not share loaded Python objects. Run
+   the pasted cell once. It loads SegFormer and SAM on the existing GPU and updates the current
+   inference/ready routes without exposing credentials.
+4. Run section 7. It must return HTTP 200 with `quality_pipeline` = `satquery-quality-v4` in the
    structured facts. The synthetic test is only a transport test, not segmentation accuracy.
 5. Run sections 8 and 9 to reopen and verify the free tunnel. If the ngrok URL changes, update
    `SATQUERY_MODEL_SERVICE_URL` in the local `.env` and restart the backend.
@@ -95,14 +103,16 @@ The supplied `sample.tif` has 3 unnamed bands, so NDWI correctly remains unavail
 
 8. Inspect the cyan candidate patches; toggle the overlay off to compare with the original. A
    rectangular box still appearing means the old handler returned boxes, not a SAM mask. Check
-   the facts for `satquery-quality-v3`. No mask may also mean no target proposal was obtained.
+   the facts for `satquery-quality-v4`. Inspect `mask_diagnostics` to distinguish the whole-scene
+   semantic path from Qwen/SAM fallback. No mask may mean the selected class was absent.
 
 For a new session, upload the updated `notebooks/SatQuery_Qwen3VL_Free_GPU_Server.ipynb`; the
 quality cell is already included as **section 6b**. Execute in order. Rerunning section 6 resets the
 routes, so always rerun 6b after it. No fine-tuning notebook or full dataset download is needed.
 
 If Kaggle reports out-of-memory, stop requests and release other models/notebooks. Do not upgrade
-to paid hardware. A failed segmentation returns text with an explicit warning, not fake shapes.
+to paid hardware. Restart the kernel and use the fully updated server notebook rather than leaving
+a partially applied handler. A failed segmentation returns text with an explicit warning, not fake shapes.
 The live GPU path must be tested after installing this cell; local unit tests cannot verify it.
 
 ## Validation before claiming precision

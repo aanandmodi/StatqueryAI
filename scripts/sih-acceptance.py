@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import time
 from pathlib import Path
 
@@ -49,11 +50,22 @@ def parse_args() -> argparse.Namespace:
 def upload(
     client: httpx.Client, base_url: str, path: Path, modality: str, role: str
 ) -> dict[str, object]:
+    suffix = path.suffix.lower()
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    exploration = suffix in {".jpg", ".jpeg", ".png", ".webp"}
+    pair_role = role in {"time_a", "time_b", "optical", "sar"}
+    # Common images have only display RGB channels; never label them multispectral.
+    effective_modality = "optical" if exploration and modality == "multispectral" else modality
     with path.open("rb") as handle:
         response = client.post(
             f"{base_url}/assets",
-            data={"modality": modality, "role": role},
-            files={"file": (path.name, handle, "image/tiff")},
+            data={
+                "modality": effective_modality,
+                "role": role,
+                "input_profile": "exploration" if exploration else "strict",
+                "registration_basis": "pixel_grid" if pair_role else "geospatial",
+            },
+            files={"file": (path.name, handle, content_type)},
         )
     response.raise_for_status()
     asset = response.json()

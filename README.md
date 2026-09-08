@@ -21,7 +21,8 @@ existing Kaggle service; apply the [one-cell notebook](notebooks/SatQuery_Live_P
 to an existing session. Cartosat/RISAT product metadata is recognized without guessing band identity.
 ChangeVQA/TerraMind training exports now match strict serving architectures. Their trained artifacts
 and accuracy evaluation **remain required**; no analytical baseline is renamed as a learned model.
-The current live service reported quality-v3; its planner route was not installed at the latest check.
+The last live service check reported quality-v3. Quality-v4 is prepared locally and must be applied
+inside the already-running Kaggle kernel before it can be claimed live.
 
 **Studio update, 2026-09-04:** [New workflow guide](docs/STUDIO_GUIDE.md) and
 [model evaluation plan](docs/MODEL_EVALUATION_PLAN.md). Exploration supports optical JPG/PNG/WebP
@@ -37,16 +38,22 @@ the running service. This does not establish regional segmentation accuracy.
 
 **Report/mask quality upgrade:** see [Analysis quality](docs/ANALYSIS_QUALITY.md).
 The local UI now supports binary masks, transparent overlays and detailed raster/mask reports.
-The updated Kaggle notebook includes **section 6b** for a longer base-instruction narrative and
-SAM 2 candidate masks. Existing Kaggle sessions must run that cell; this is not a remotely applied
-model change or evidence of validated segmentation accuracy.
+The updated Kaggle notebook includes **section 6b** for a longer base-instruction narrative,
+whole-scene LoveDA SegFormer class masks, and Qwen/SAM fallback for unsupported targets. Existing
+Kaggle sessions must run that cell; this is not a remotely applied model change or evidence of
+validated segmentation accuracy. The transfer checkpoint is experimental and has no declared
+license/model card. Train the user-owned replacement with
+[`SatQuery_SegFormer_LoveDA_Training.ipynb`](notebooks/SatQuery_SegFormer_LoveDA_Training.ipynb)
+and follow the [model-quality roadmap](docs/MODEL_QUALITY_ROADMAP.md).
 
 | Capability | State | Implementation |
 |---|---:|---|
 | GeoTIFF + location metadata | Ready | Raster validation plus bounded latitude, longitude, altitude and metadata |
 | Single-image VQA | Implemented; live inference gate required | Qwen3-VL 2B + released LoRA |
 | Scene caption | Implemented; live inference gate required | Same released specialist with a constrained prompt |
-| Grounding and marked image | Live JPEG + GPU mask verified; accuracy unvalidated | Qwen proposals + SAM 2; water-only NDWI with named green/NIR |
+| Grounding and marked image | Live v3 GPU mask verified; v4 accuracy unvalidated | Whole-scene semantic transfer baseline for named classes; Qwen + SAM fallback; verified-band spectral tools |
+| Spectral evidence | Implemented analytical tools | NDWI/NDVI with verified bands; NDBI/NBR/dNBR only for verified Sentinel-2 SWIR |
+| Multi-class overlays | Implemented | Bounded mask vectorization and class-coloured SVG polygons with raster fallback |
 | Text answer, warnings, provenance, trace | Ready | Schema-validated integration and SQLite job record |
 | RGB preview, informative JPEG overlay, PDF report | Ready | Overlay always labels metadata/answer; boxes appear only when valid |
 | Bi-temporal change analysis | Runnable CPU baseline | Quantified spectral-change proxy + evidence; learned CDVQA notebook remains release-gated |
@@ -56,6 +63,9 @@ model change or evidence of validated segmentation accuracy.
 
 The current code/notebook checks do not establish a live Kaggle connection or semantic benchmark
 quality. Require the notebook smoke tests and real-image acceptance procedure below before a demo.
+Real base-versus-LoRA instructions and the CPU-only scorer are in
+[the real evaluation runbook](docs/REAL_EVALUATION_RUNBOOK.md). No benchmark number is shipped
+unless it can be traced to raw per-example predictions.
 
 ## Local topology
 
@@ -150,6 +160,7 @@ explicit plumbing tests only, never model acceptance. Neither mode measures benc
 | [Data model](docs/DATA_MODEL.md) | Image, location context, result, evidence and provenance schemas |
 | [API](docs/API.md) | Endpoints, schemas, lifecycle, error semantics |
 | [Testing](docs/TESTING.md) | Unit, integration, build, and real-model gates |
+| [Model-quality roadmap](docs/MODEL_QUALITY_ROADMAP.md) | Separate VLM, segmentation, change and fusion quality gates |
 | [SIH compliance matrix](docs/SIH_COMPLIANCE_MATRIX.md) | Requirement-by-requirement status and evaluation gaps |
 | [SIH demonstration runbook](docs/SIH_DEMO_RUNBOOK.md) | Exact five-workflow acceptance procedure |
 | [Security](docs/SECURITY.md) | Threat model, secrets, uploads, and retention |

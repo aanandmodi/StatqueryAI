@@ -159,8 +159,74 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+const evidencePalette: Record<string, string> = {
+  water: '#2dcef2',
+  vegetation: '#63e39a',
+  'built-up': '#ffc857',
+  'burn-scar': '#f06a6a',
+  change: '#c78cff',
+  unknown: '#8bd0ff',
+};
+
+function evidenceColor(item: EvidenceItem) {
+  const rawClass = item.geometry.class_name;
+  const declared = typeof rawClass === 'string' ? rawClass.toLowerCase() : '';
+  return evidencePalette[declared] ?? evidencePalette.unknown;
+}
+
+function vectorPaths(item: EvidenceItem) {
+  if (!Array.isArray(item.geometry.polygons)) return [];
+  return item.geometry.polygons.flatMap((candidate, polygonIndex) => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const rings = (candidate as { rings?: unknown }).rings;
+    if (!Array.isArray(rings)) return [];
+    const commands = rings
+      .map((ring) => {
+        if (!Array.isArray(ring)) return '';
+        const points = ring
+          .map((point) => {
+            if (!Array.isArray(point) || point.length !== 2) return null;
+            const x = Number(point[0]);
+            const y = Number(point[1]);
+            return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+          })
+          .filter((point): point is number[] => point !== null);
+        if (points.length < 4) return '';
+        return `M ${points.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`;
+      })
+      .filter(Boolean)
+      .join(' ');
+    return commands ? [{ id: `${item.id}-${polygonIndex}`, commands }] : [];
+  });
+}
+
 function EvidenceOverlay({ item }: { item: EvidenceItem }) {
   if (item.type === 'mask' && item.artifact_url?.startsWith('/v1/analyses/')) {
+    const paths = vectorPaths(item);
+    if (paths.length) {
+      const color = evidenceColor(item);
+      return (
+        <svg
+          className="evidence-vector"
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          aria-label={`${item.label} — candidate polygon overlay`}
+        >
+          <title>{`${item.label} — candidate polygon overlay`}</title>
+          {paths.map((path) => (
+            <path
+              key={path.id}
+              d={path.commands}
+              fill={color}
+              fillRule="evenodd"
+              stroke={color}
+              strokeWidth="0.0025"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </svg>
+      );
+    }
     return (
       <Image
         className="evidence-mask"
@@ -1235,7 +1301,7 @@ export default function Home() {
                 </label>
                 <p>
                   {visibleEvidence.some((item) => item.type === 'mask')
-                    ? 'Cyan pixels are mask predictions, not verified boundaries. Toggle off to inspect the source. Areas measure the mask, not ground truth.'
+                    ? 'Class-colored polygons trace candidate mask regions: blue water, green vegetation, amber built-up, red burn-scar, violet change. Toggle off to inspect the source; areas measure predictions, not ground truth.'
                     : visibleEvidence.length
                       ? 'Coarse model boxes only — not pixel-level segmentation.'
                       : result.evidence.length

@@ -1,5 +1,49 @@
 # Project progress
 
+## Semantic-mask and report-quality pass — 2026-09-08
+
+- Quality-v4 replaces the failed Qwen-box-first path for supported land-cover classes with a
+  whole-scene LoveDA SegFormer transfer baseline. Qwen + SAM remains a bounded fallback for
+  unsupported prompted objects. The checkpoint is pinned, but its author provides no model card or
+  declared license; it is not a release artifact and no India/ISRO accuracy is claimed.
+- Added an upload-ready free-Kaggle training notebook for a user-owned SegFormer B0 checkpoint. It
+  uses 70% of LoveDA's official training split, stratified by urban/rural domain, while preserving
+  the complete official validation split. It computes real per-class IoU/Dice, saves manifests and
+  hashes, resumes checkpoints, reloads safetensors and gates optional Hub upload.
+- Replaced terse temporal and optical/SAR prose with structured, measured reports. Change reports
+  separate observed differences from possible explanations; fusion reports expose cue agreement
+  and disagreement instead of presenting analytical proxies as semantic truth.
+- Generated and syntax-checked the updated server, live-patch and segmentation-training notebooks.
+  Verification: **277 backend/ML tests and 10 proxy tests passed**; frontend lint, TypeScript and
+  production build passed. Quality-v4 still requires a live Kaggle GPU run and labelled-image
+  evaluation before any accuracy claim.
+- After restarting the local controller, a real-model five-workflow rerun passed using actual
+  JPG/PNG jury fixtures. Temporal case `anl_6a5862bbd8ac40e5a35a659dfc0b4fcc` and fusion case
+  `anl_a017754008e84cda96b0a57e940e1562` contain the new structured reports. The remote service was
+  still quality-v3 during this run, so single-image case `anl_df956101f0b1482aac51a23bc92512f0`
+  is transport evidence only and must not be used to claim the v4 mask improvement.
+
+Next actions: apply quality-v4 in the active Kaggle kernel, run a real single-image smoke test, then
+run the segmentation-training notebook in a separate Kaggle session. See
+[Model quality roadmap](MODEL_QUALITY_ROADMAP.md).
+
+## Evidence-integrity and spectral-overlay pass — 2026-09-08
+
+- Removed the random/hard-coded benchmark generator and all reports derived from it. No replacement
+  score is claimed.
+- The evaluation-only Kaggle notebook now compares the exact same loaded base and LoRA model via
+  `disable_adapter()`, and exports raw per-example JSONL. A local CPU scorer calculates real task
+  metrics, scene-cluster bootstrap intervals and a clearly labelled calibration diagnostic.
+- Added sensor-qualified NDVI, Sentinel-2-only NDBI/NBR and temporal dNBR. Cartosat requests that
+  require SWIR explicitly refuse instead of guessing a band.
+- Candidate masks are bounded-vectorized into class-labelled polygons and rendered as multi-colour
+  SVG overlays, with the original raster mask retained as a fallback/download.
+- Demo simulator prose now says that no pixels or models were inspected; it cannot be mistaken for
+  measured evidence.
+- Verification: **275 backend/ML tests passed**, Python/frontend lint passed, TypeScript passed and
+  the production frontend build passed. Learned ChangeVQA and pixel-supervised fusion checkpoints
+  remain open release gates.
+
 ## Critical-gap implementation — 2026-09-04
 
 - Added optional learned Qwen intent proposals plus bounded dependency planning, focused step

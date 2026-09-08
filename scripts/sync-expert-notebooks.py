@@ -1,5 +1,6 @@
 """Mechanical source-of-truth sync: notebook architectures -> runtime, sensors -> ML."""
 import ast
+import json
 from pathlib import Path
 
 import jupytext
@@ -75,7 +76,6 @@ nb = jupytext.reads(source.replace("# ruff: noqa: E402\n", "", 1), fmt="py:perce
 server.with_suffix(".ipynb").write_text(jupytext.writes(nb, fmt="ipynb"), encoding="utf-8", newline="\n")
 print("Created live one-cell upgrade notebook and synchronized sensor-aware server.")
 
-import json
 runtime_files = {
     "satquery_ml/__init__.py": "", "satquery_ml/models/__init__.py": "",
     "satquery_model_service/__init__.py": "",

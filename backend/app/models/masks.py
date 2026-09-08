@@ -7,35 +7,164 @@ import binascii
 import hashlib
 import io
 import json
+import math
+from itertools import pairwise
 
 import numpy as np
 import rasterio
 from PIL import Image
+from rasterio import Affine
 from rasterio.enums import Resampling
+from rasterio.features import shapes
 
 from app.core.scene_report import pixel_area_m2
-from app.core.sensors import semantic_indexes, visual_indexes
+from app.core.sensors import semantic_indexes, sensor_profile, visual_indexes
 from app.schemas import EvidenceItem, Modality, TaskType
 
 MAX_MASK_EDGE = 2048
 MAX_MASK_BYTES = 1_000_000
+MAX_VECTOR_POLYGONS = 64
+MAX_VECTOR_VERTICES = 8_000
+
+EVIDENCE_PALETTE = {
+    "water": "#2dcef2",
+    "vegetation": "#63e39a",
+    "built-up": "#ffc857",
+    "burn-scar": "#f06a6a",
+    "change": "#c78cff",
+    "unknown": "#8bd0ff",
+}
+
+
+def evidence_class(item: EvidenceItem) -> str:
+    declared = str(item.geometry.get("target", "")).lower()
+    label = item.label.lower()
+    combined = f"{declared} {label}"
+    if "water" in combined or "flood" in combined:
+        return "water"
+    if any(name in combined for name in ("vegetation", "forest", "crop", "ndvi")):
+        return "vegetation"
+    if any(name in combined for name in ("built", "urban", "building", "ndbi")):
+        return "built-up"
+    if any(name in combined for name in ("burn", "nbr")):
+        return "burn-scar"
+    if "change" in combined or "loss" in combined or "gain" in combined:
+        return "change"
+    return "unknown"
+
+
+def evidence_color(item: EvidenceItem) -> str:
+    return EVIDENCE_PALETTE[evidence_class(item)]
+
+
+def _ring_area(ring: list[list[float]]) -> float:
+    return abs(
+        sum(
+            left[0] * right[1] - right[0] * left[1]
+            for left, right in pairwise(ring)
+        )
+    ) / 2
+
+
+def _bounded_ring(ring: list[list[float]], remaining: int) -> list[list[float]]:
+    points = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else ring
+    if len(points) < 3 or remaining < 4:
+        return []
+    allowed = min(512, remaining - 1)
+    stride = max(1, math.ceil(len(points) / allowed))
+    sampled = points[::stride][:allowed]
+    if len(sampled) < 3:
+        return []
+    return [*sampled, sampled[0]]
+
+
+def vectorize_mask(
+    mask: np.ndarray,
+    *,
+    class_name: str,
+    confidence: float,
+    analysis_pixel_area_m2: float | None,
+) -> list[dict]:
+    """Return a bounded normalized polygon view while retaining the exact binary mask."""
+    height, width = mask.shape
+    minimum_pixels = max(4.0, mask.size * 0.00002)
+    candidates = []
+    for geometry, value in shapes(
+        mask.astype(np.uint8),
+        mask=mask,
+        transform=Affine.scale(1 / width, 1 / height),
+        connectivity=8,
+    ):
+        if int(value) != 1 or geometry.get("type") != "Polygon":
+            continue
+        raw_rings = [
+            [[round(float(x), 7), round(float(y), 7)] for x, y in ring]
+            for ring in geometry.get("coordinates", [])
+        ]
+        if not raw_rings:
+            continue
+        normalized_area = max(
+            0.0,
+            _ring_area(raw_rings[0]) - sum(_ring_area(ring) for ring in raw_rings[1:]),
+        )
+        pixel_area = normalized_area * mask.size
+        if pixel_area >= minimum_pixels:
+            candidates.append((pixel_area, raw_rings))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+
+    output = []
+    vertices = 0
+    for pixel_area, raw_rings in candidates[:MAX_VECTOR_POLYGONS]:
+        bounded = []
+        for ring in raw_rings:
+            clean = _bounded_ring(ring, MAX_VECTOR_VERTICES - vertices)
+            if clean:
+                bounded.append(clean)
+                vertices += len(clean)
+        if not bounded:
+            break
+        output.append(
+            {
+                "rings": bounded,
+                "class": class_name,
+                "confidence": round(float(confidence), 6),
+                "pixel_area": round(float(pixel_area), 3),
+                "area_m2": (
+                    round(float(pixel_area * analysis_pixel_area_m2), 3)
+                    if analysis_pixel_area_m2 is not None
+                    else None
+                ),
+            }
+        )
+        if vertices >= MAX_VECTOR_VERTICES:
+            break
+    return output
+
+
+SPECTRAL_METHODS = {
+    "NDWI (green - NIR) / (green + NIR)": ["green", "nir"],
+    "NDVI (NIR - red) / (NIR + red)": ["nir", "red"],
+    "NDBI (SWIR1 - NIR) / (SWIR1 + NIR)": ["swir1", "nir"],
+    "NBR (NIR - SWIR2) / (NIR + SWIR2)": ["nir", "swir2"],
+}
 
 
 def mask_support(source, shape, method):
     """Shared support for dependent masks and their final reported statistics."""
     height, width = shape
-    ndwi = method == "NDWI (green - NIR) / (green + NIR)"
-    indexes = semantic_indexes(source, ["green", "nir"]) if ndwi else visual_indexes(source)
+    meanings = SPECTRAL_METHODS.get(method)
+    indexes = semantic_indexes(source, meanings) if meanings else visual_indexes(source)
     if indexes is None:
-        raise ValueError("NDWI comparison requires verified green/NIR bands at both dates")
-    sampling = Resampling.nearest if ndwi else Resampling.bilinear
+        required = "/".join(meanings or [])
+        raise ValueError(f"Spectral comparison requires verified {required} bands at both dates")
+    sampling = Resampling.nearest if meanings else Resampling.bilinear
     raw = source.read(
         indexes, out_shape=(len(indexes), height, width), masked=True, resampling=sampling
     ).astype(np.float32)
     values = np.ma.filled(raw, np.nan)
     valid = np.isfinite(values).all(axis=0)
     valid &= source.dataset_mask(out_shape=(height, width), resampling=sampling) > 0
-    if ndwi:
+    if meanings:
         for plane, index in enumerate(indexes):
             values[plane] = values[plane] * source.scales[index - 1] + source.offsets[index - 1]
         valid &= (
@@ -80,27 +209,69 @@ def decode_mask(geometry: dict) -> np.ndarray:
 
 
 def spectral_water_output(output, step, assets, asset_store):
-    """Use NDWI ONLY with explicitly named green and NIR bands. Never guess NIR from RGB."""
+    """Replace coarse boxes with a sensor-qualified spectral mask when the query permits it."""
     if (
         step.task != TaskType.GROUNDING
         or len(assets) != 1
-        or step.permitted_params.get("targets", []) != ["water"]
         or assets[0].modality == Modality.SAR
     ):
         return output
     asset = assets[0]
     with rasterio.open(asset_store.resolve(asset.id)) as source:
-        indexes = semantic_indexes(source, ["green", "nir"])
-        if indexes is None:
+        targets = {str(item).lower() for item in step.permitted_params.get("targets", [])}
+        if targets == {"water"}:
+            meanings = ["green", "nir"]
+            method = "NDWI (green - NIR) / (green + NIR)"
+            label = "Water candidate (NDWI)"
+            target = "water"
+            threshold = float(step.permitted_params.get("water_index_threshold", 0.0))
+            comparator = "greater"
+        elif targets and targets <= {
+            "vegetation",
+            "forest",
+            "cropland",
+            "agriculture",
+            "drought",
+        }:
+            meanings = ["nir", "red"]
+            method = "NDVI (NIR - red) / (NIR + red)"
+            label = "Vegetation candidate (NDVI)"
+            target = "vegetation"
+            threshold = float(step.permitted_params.get("threshold", 0.3))
+            comparator = "greater"
+        elif targets and targets <= {"built-up", "urban", "building"}:
+            meanings = ["swir1", "nir"]
+            method = "NDBI (SWIR1 - NIR) / (SWIR1 + NIR)"
+            label = "Built-up candidate (NDBI)"
+            target = "built-up"
+            threshold = float(step.permitted_params.get("threshold", 0.0))
+            comparator = "greater"
+        elif targets and targets <= {"burn", "burn-scar", "burned"}:
+            meanings = ["nir", "swir2"]
+            method = "NBR (NIR - SWIR2) / (NIR + SWIR2)"
+            label = "Low-NBR candidate (single date)"
+            target = "burn-scar"
+            threshold = float(step.permitted_params.get("threshold", 0.1))
+            comparator = "less"
+        else:
+            return output
+
+        profile = sensor_profile(source)
+        if "swir" in " ".join(meanings) and profile["platform"] != "sentinel-2":
             warning = (
-                "NDWI unavailable: explicit green and NIR band descriptions are missing; "
-                "RGB is not NIR."
+                f"{method.split(' ', 1)[0]} unavailable: {profile['platform']} has no verified "
+                "SWIR band contract. Cartosat-2-series cannot supply NDBI/NBR."
             )
             return output.model_copy(update={"warnings": [*output.warnings, warning]})
-        green, nir = [indexes[0]], [indexes[1]]
+        indexes = semantic_indexes(source, meanings)
+        if indexes is None:
+            warning = (
+                f"{method.split(' ', 1)[0]} unavailable: explicit "
+                f"{'/'.join(meanings)} band descriptions are missing; RGB is not NIR/SWIR."
+            )
+            return output.model_copy(update={"warnings": [*output.warnings, warning]})
         scale = min(1.0, MAX_MASK_EDGE / max(source.width, source.height))
         height, width = max(1, round(source.height * scale)), max(1, round(source.width * scale))
-        indexes = [green[0], nir[0]]
         raw = source.read(
             indexes, out_shape=(2, height, width), masked=True, resampling=Resampling.nearest
         ).astype(np.float32)
@@ -109,13 +280,16 @@ def spectral_water_output(output, step, assets, asset_store):
             raw[plane] = raw[plane] * source.scales[index - 1] + source.offsets[index - 1]
         denominator = raw[0] + raw[1]
         valid = np.isfinite(raw).all(axis=0) & (denominator > 1e-8) & (raw >= 0).all(axis=0)
-        ndwi = np.divide(raw[0] - raw[1], denominator, out=np.zeros_like(denominator), where=valid)
-        threshold = float(step.permitted_params.get("water_index_threshold", 0.0))
-        mask = valid & (ndwi > threshold)
+        index_values = np.divide(
+            raw[0] - raw[1], denominator, out=np.zeros_like(denominator), where=valid
+        )
+        mask = valid & (
+            (index_values > threshold) if comparator == "greater" else (index_values < threshold)
+        )
     evidence = EvidenceItem(
-        id="ev_water_ndwi",
+        id=f"ev_{target.replace('-', '_')}_{method.split(' ', 1)[0].lower()}",
         type="mask",
-        label="Water candidate (NDWI)",
+        label=label,
         score=0.5,
         coordinate_space="pixel",
         asset_id=asset.id,
@@ -124,12 +298,14 @@ def spectral_water_output(output, step, assets, asset_store):
             "data": encode_mask(mask),
             "width": width,
             "height": height,
-            "method": "NDWI (green - NIR) / (green + NIR)",
+            "method": method,
             "threshold": threshold,
+            "comparison": comparator,
             "status": "candidate",
-            "target": "water",
+            "target": target,
             "band_indexes": indexes,
-            "validity_basis": "finite nonnegative calibrated green/NIR with positive sum",
+            "band_meanings": meanings,
+            "validity_basis": "finite nonnegative calibrated spectral bands with positive sum",
         },
     )
     return output.model_copy(
@@ -138,18 +314,27 @@ def spectral_water_output(output, step, assets, asset_store):
             "facts": [
                 *output.facts,
                 {
-                    "name": "water_mask_method",
-                    "value": "NDWI-v1",
-                    "green_band": green[0],
-                    "nir_band": nir[0],
+                    "name": "spectral_mask_method",
+                    "value": method.split(" ", 1)[0],
+                    "band_meanings": meanings,
+                    "band_indexes": indexes,
                     "threshold": threshold,
                 },
             ],
             "warnings": [
                 *output.warnings,
-                "NDWI candidates replace coarse model boxes for this water request. "
-                "A threshold of zero is a baseline, not a validated universal classifier. "
-                "Band calibration, shadows, snow, buildings and cloud require review.",
+                f"{method.split(' ', 1)[0]} candidates replace coarse model boxes for this "
+                "request. The threshold is a baseline, not a validated universal classifier; "
+                "band calibration, atmosphere, shadows, season and land-cover confounders require "
+                "review.",
+                *(
+                    [
+                        "Single-date NBR cannot establish a burn scar or severity. Use a "
+                        "co-registered pre/post Sentinel-2 pair and dNBR for that claim."
+                    ]
+                    if target == "burn-scar"
+                    else []
+                ),
             ],
         }
     )
@@ -184,15 +369,20 @@ def materialize_masks(analysis_id, evidence, assets, asset_store, artifacts, api
             valid = (
                 source.dataset_mask(out_shape=(height, width), resampling=Resampling.nearest) > 0
             )
-            if item.geometry.get("method") == "NDWI (green - NIR) / (green + NIR)":
+            spectral_method = item.geometry.get("method")
+            if spectral_method in SPECTRAL_METHODS:
+                meanings = SPECTRAL_METHODS[spectral_method]
                 indexes = item.geometry.get("band_indexes")
                 if (
                     not isinstance(indexes, list)
                     or len(indexes) != 2
                     or not all(type(i) is int and 1 <= i <= source.count for i in indexes)
-                    or indexes != semantic_indexes(source, ["green", "nir"])
+                    or indexes != semantic_indexes(source, meanings)
                 ):
-                    raise ValueError("NDWI support requires verified green/NIR band indexes")
+                    raise ValueError(
+                        f"{spectral_method.split(' ', 1)[0]} support requires verified "
+                        f"{'/'.join(meanings)} band indexes"
+                    )
                 spectral = source.read(
                     indexes,
                     out_shape=(2, height, width),
@@ -269,6 +459,7 @@ def materialize_masks(analysis_id, evidence, assets, asset_store, artifacts, api
         }
         if verified_group:
             geometry["mask_group"] = verified_group
+        class_name = evidence_class(item)
         geometry.update(
             {
                 "width": width,
@@ -283,6 +474,14 @@ def materialize_masks(analysis_id, evidence, assets, asset_store, artifacts, api
                 "resampled": width != asset.metadata.width or height != asset.metadata.height,
                 "status": "candidate",
                 "encoding": "binary-png-artifact",
+                "class_name": class_name,
+                "color_hex": EVIDENCE_PALETTE[class_name],
+                "polygons": vectorize_mask(
+                    mask,
+                    class_name=class_name,
+                    confidence=item.score,
+                    analysis_pixel_area_m2=analysis_pixel_area,
+                ),
             }
         )
         result.append(

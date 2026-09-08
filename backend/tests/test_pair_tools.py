@@ -105,6 +105,9 @@ async def test_local_change_tool_returns_quantified_evidence(
     )
     assert changed == pytest.approx(0.1875, abs=0.02)
     assert output.evidence and output.evidence[0].asset_id == before.id
+    assert "## Executive finding" in output.text
+    assert "## Plausible explanations—not conclusions" in output.text
+    assert "## Verification required" in output.text
 
 
 @pytest.mark.asyncio
@@ -144,8 +147,12 @@ async def test_local_fusion_tool_supports_single_band_sar(
         "water_proxy",
         "built-up_proxy",
         "valid_pixel_fraction",
+        "water_cue_disagreement_fraction",
+        "structure_cue_disagreement_fraction",
     }
     assert all(item.asset_id == optical.id for item in output.evidence)
+    assert "## Agreement and disagreement" in output.text
+    assert "## Verification required" in output.text
 
 
 @pytest.mark.asyncio

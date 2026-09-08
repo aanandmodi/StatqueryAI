@@ -42,7 +42,14 @@ def sensor_profile(source):
     numeric = (
         {"b1": "blue", "b2": "green", "b3": "red", "b4": "nir"}
         if platform == "cartosat-2-series"
-        else {"b2": "blue", "b3": "green", "b4": "red", "b8": "nir"}
+        else {
+            "b2": "blue",
+            "b3": "green",
+            "b4": "red",
+            "b8": "nir",
+            "b11": "swir1",
+            "b12": "swir2",
+        }
         if platform == "sentinel-2"
         else {}
     )
@@ -52,6 +59,10 @@ def sensor_profile(source):
         "blue": "blue",
         "nir": "nir",
         "nearinfrared": "nir",
+        "swir1": "swir1",
+        "shortwaveinfrared1": "swir1",
+        "swir2": "swir2",
+        "shortwaveinfrared2": "swir2",
         "pan": "pan",
         "panchromatic": "pan",
     }

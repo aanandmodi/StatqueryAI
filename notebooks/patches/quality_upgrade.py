@@ -6,11 +6,18 @@
 import base64
 from contextlib import nullcontext
 
-from transformers import Sam2Model, Sam2Processor
+from transformers import (
+    AutoImageProcessor,
+    Sam2Model,
+    Sam2Processor,
+    SegformerForSemanticSegmentation,
+)
 
-QUALITY_VERSION = "satquery-quality-v3"
+QUALITY_VERSION = "satquery-quality-v4"
 SAM_REPO = "facebook/sam2.1-hiera-tiny"
 SAM_REVISION = "de431c4043854a71d8101e17995dfe596bf101a5"
+SEGMENTATION_REPO = "wu-pr-gw/segformer-b2-finetuned-with-LoveDA"
+SEGMENTATION_REVISION = "5c74556c08bebb5f45f50b6f78f61a62c5d220c7"
 QUALITY_IMAGE_EDGE = 1024
 QUALITY_MAX_TOKENS = 768
 QUALITY_MAX_TARGETS = 3
@@ -34,6 +41,48 @@ if globals().get("quality_sam_revision") != SAM_REVISION:
         use_safetensors=True, torch_dtype=torch.float32,
     ).to("cuda:0").eval()
     quality_sam_revision = SAM_REVISION
+
+# LoveDA supplies whole-scene semantic classes. This fixes the architectural failure where SAM
+# precisely traced a semantically wrong Qwen box. The checkpoint is still a transfer baseline,
+# not proof of accuracy on India, ISRO sensors, Sentinel-2 composites or arbitrary resolutions.
+if globals().get("quality_segmentation_revision") != SEGMENTATION_REVISION:
+    quality_segmentation_processor = AutoImageProcessor.from_pretrained(
+        SEGMENTATION_REPO,
+        revision=SEGMENTATION_REVISION,
+        trust_remote_code=False,
+    )
+    quality_segmentation = SegformerForSemanticSegmentation.from_pretrained(
+        SEGMENTATION_REPO,
+        revision=SEGMENTATION_REVISION,
+        trust_remote_code=False,
+        # This pinned transfer checkpoint publishes pytorch_model.bin, not safetensors.
+        # The exact immutable revision is mandatory; our own trained replacement exports
+        # safetensors and should supersede this experimental baseline after evaluation.
+        use_safetensors=False,
+        torch_dtype=torch.float16,
+    ).to("cuda:0").eval()
+    quality_segmentation_revision = SEGMENTATION_REVISION
+
+
+SEMANTIC_TARGETS = {
+    "water": {"water"},
+    "river": {"water"},
+    "reservoir": {"water"},
+    "lake": {"water"},
+    "vegetation": {"forest", "agricultural"},
+    "forest": {"forest"},
+    "cropland": {"agricultural"},
+    "agriculture": {"agricultural"},
+    "agricultural": {"agricultural"},
+    "building": {"building"},
+    "buildings": {"building"},
+    "built-up": {"building"},
+    "urban": {"building"},
+    "road": {"road"},
+    "roads": {"road"},
+    "barren": {"barren"},
+    "bare land": {"barren"},
+}
 
 
 def quality_decode(data):
@@ -113,6 +162,84 @@ def quality_segment(image, boxes, valid):
     return union, scores
 
 
+@torch.inference_mode()
+def quality_semantic_mask(image, target, valid):
+    """Return a whole-scene LoveDA class mask; confidence is diagnostic, not calibrated."""
+    requested_labels = SEMANTIC_TARGETS.get(str(target).strip().lower())
+    if not requested_labels:
+        return None
+    inputs = quality_segmentation_processor(images=image, return_tensors="pt")
+    pixel_values = inputs["pixel_values"].to(
+        quality_segmentation.device, dtype=quality_segmentation.dtype
+    )
+    logits = quality_segmentation(pixel_values=pixel_values).logits
+    logits = torch.nn.functional.interpolate(
+        logits,
+        size=(image.height, image.width),
+        mode="bilinear",
+        align_corners=False,
+    )[0]
+    probabilities = logits.softmax(dim=0)
+    prediction = probabilities.argmax(dim=0)
+    id2label = {
+        int(class_id): str(label).strip().lower()
+        for class_id, label in quality_segmentation.config.id2label.items()
+    }
+    selected_ids = [
+        class_id for class_id, label in id2label.items() if label in requested_labels
+    ]
+    if not selected_ids:
+        raise ValueError(f"The semantic checkpoint has no class mapping for {target}")
+    mask_tensor = torch.zeros_like(prediction, dtype=torch.bool)
+    for class_id in selected_ids:
+        mask_tensor |= prediction == class_id
+    mask = mask_tensor.cpu().numpy() & valid
+    selected_probability = probabilities[selected_ids].sum(dim=0).float().cpu().numpy()
+    mean_probability = float(selected_probability[mask].mean()) if mask.any() else 0.0
+    return mask, mean_probability, [id2label[class_id] for class_id in selected_ids]
+
+
+def quality_guard_narrative(text):
+    """Remove visually unsupported physical-condition claims if the VLM ignores its prompt."""
+    risky = re.compile(
+        r"\b(?:shallow|water depth|depth|slow[- ]moving|flow velocity|consistent flow|"
+        r"water flow|current speed|erosion|sediment transport|vegetation health|healthy|"
+        r"degradation|well[- ]maintained|paved|unpaved|rainfall|historical weather)\b",
+        flags=re.IGNORECASE,
+    )
+    explicit_limit = re.compile(
+        r"\b(?:cannot|can't|not (?:clear|resolved|enough|possible)|unclear|unknown|"
+        r"requires? verification|would require)\b",
+        flags=re.IGNORECASE,
+    )
+    kept = []
+    removed = []
+    for line in str(text or "").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            pieces = [line]
+        else:
+            pieces = re.split(r"(?<=[.!?])\s+", line.strip())
+        accepted = []
+        for sentence in pieces:
+            if risky.search(sentence) and not explicit_limit.search(sentence):
+                removed.append(sentence.strip())
+            else:
+                accepted.append(sentence.strip())
+        if accepted:
+            kept.append(" ".join(accepted))
+        elif not line.strip():
+            kept.append("")
+    guarded = "\n".join(kept).strip()
+    if removed:
+        guarded += (
+            "\n\n## Guarded attributes\n\n"
+            "Depth, flow/velocity, road-surface material, vegetation health and weather history "
+            "cannot be established from this display image; unsupported assertions about those "
+            "attributes were omitted from the main report."
+        )
+    return guarded, removed
+
+
 def quality_analyze(data, task, contract):
     image, valid, info = quality_decode(data)
     asset_id = contract.assets[0].id
@@ -136,12 +263,16 @@ def quality_analyze(data, task, contract):
         f"\nUser question: {contract.query}\n"
         + context_text(context), QUALITY_MAX_TOKENS,
     )
+    narrative, removed_narrative_claims = quality_guard_narrative(narrative)
     warnings = [
         "Narrative and target proposals use the base Qwen3-VL instruction model with the adapter temporarily disabled; "
         "the released adapter supplies the short observation. Neither is a calibrated correctness estimate.",
         "SAM 2 only refines proposed regions. A water label is inherited from the Qwen proposal, not "
         "independently verified by SAM. Masks are candidates and may miss water or include non-water.",
         "No pixel accuracy or IoU on this scene is known. Thin features and boundaries may be lost on the bounded analysis grid.",
+        "The LoveDA SegFormer is a whole-scene remote-sensing transfer baseline. Its class "
+        "probabilities are uncalibrated and its geographic/resolution transfer to this image "
+        "has not been established.",
     ]
     if not info["declared_rgb"]:
         warnings.append("RGB band mapping was not declared; the first three bands form an assumed display preview. "
@@ -153,6 +284,33 @@ def quality_analyze(data, task, contract):
         if not targets:
             warnings.append("No supported target class was identified. Ask to outline water, buildings, roads, forest or cropland.")
         for target in targets[:QUALITY_MAX_TARGETS]:
+            semantic = quality_semantic_mask(image, target, valid)
+            if semantic is not None:
+                mask, semantic_score, semantic_labels = semantic
+                if not mask.any():
+                    warnings.append(
+                        f"The semantic baseline selected no {target} pixels; no mask was invented."
+                    )
+                    continue
+                evidence.append({
+                    "id": f"ev_semantic_{len(evidence) + 1}", "type": "mask",
+                    "label": f"{target} candidate (LoveDA SegFormer)",
+                    "score": min(0.59, semantic_score),
+                    "coordinate_space": "pixel", "asset_id": asset_id, "artifact_url": None,
+                    "geometry": {"encoding": "png-base64", "data": quality_png(mask),
+                                 "width": image.width, "height": image.height,
+                                 "method": "whole-scene LoveDA SegFormer semantic classes",
+                                 "status": "candidate", "target": target,
+                                 "semantic_classes": semantic_labels},
+                })
+                mask_diagnostics.append({
+                    "target": target,
+                    "method": "LoveDA SegFormer whole-scene semantic mask",
+                    "semantic_classes": semantic_labels,
+                    "selected_pixel_fraction": float(mask.sum() / max(1, valid.sum())),
+                    "mean_selected_probability_uncalibrated": semantic_score,
+                })
+                continue
             proposal = quality_generate(image,
                 f"Locate only visible {target} regions in this remote-sensing image. "
                 f"Return up to {QUALITY_MAX_BOXES} tight boxes, separately for disconnected visible regions, "
@@ -191,12 +349,15 @@ def quality_analyze(data, task, contract):
             {"name": "short_adapter_observation", "value": observation, "model": MODEL_VERSION},
             {"name": "narrative_model", "value": f"{BASE_MODEL}@{BASE_REVISION}", "adapter_enabled": False},
             {"name": "segmentation_model", "value": f"{SAM_REPO}@{SAM_REVISION}"},
+            {"name": "semantic_segmentation_model",
+             "value": f"{SEGMENTATION_REPO}@{SEGMENTATION_REVISION}"},
             {"name": "analysis_grid", "value": info},
             {"name": "mask_diagnostics", "value": mask_diagnostics},
+            {"name": "guarded_narrative_claim_count", "value": len(removed_narrative_claims)},
             {"name": "quality_pipeline", "value": QUALITY_VERSION},
         ],
         "evidence": evidence, "raw_score": 0.5, "score_kind": "uncalibrated",
-        "model_version": f"{QUALITY_VERSION};adapter={MODEL_VERSION};narrative={BASE_MODEL}@{BASE_REVISION[:12]};sam={SAM_REVISION[:12]}",
+        "model_version": f"{QUALITY_VERSION};adapter={MODEL_VERSION};narrative={BASE_MODEL}@{BASE_REVISION[:12]};semantic={SEGMENTATION_REVISION[:12]};sam={SAM_REVISION[:12]}",
         "warnings": warnings,
     }
 
@@ -227,7 +388,9 @@ async def quality_infer(
 
 async def quality_ready():
     return {"status": "ready", "capability": "vlm", "model_version": MODEL_VERSION,
-            "quality_pipeline": QUALITY_VERSION, "segmentation": f"{SAM_REPO}@{SAM_REVISION[:12]}"}
+            "quality_pipeline": QUALITY_VERSION,
+            "semantic_segmentation": f"{SEGMENTATION_REPO}@{SEGMENTATION_REVISION[:12]}",
+            "segmentation": f"{SAM_REPO}@{SAM_REVISION[:12]}"}
 
 
 # Execute a real SAM forward pass before switching the HTTP handler. Synthetic data validates
@@ -240,6 +403,13 @@ quality_probe_mask, quality_probe_scores = quality_segment(
 assert quality_probe_mask.shape == (sample.height, sample.width)
 assert quality_probe_scores and np.isfinite(quality_probe_scores).all()
 print("PASS: SAM 2 executed a GPU forward pass and returned a source-aligned mask (not an accuracy test).")
+quality_probe_semantic = quality_semantic_mask(sample, "vegetation", np.ones(
+    (sample.height, sample.width), dtype=bool
+))
+assert quality_probe_semantic is not None and quality_probe_semantic[0].shape == (
+    sample.height, sample.width
+)
+print("PASS: LoveDA SegFormer returned a source-aligned whole-scene class mask (not an accuracy test).")
 
 # Replace only these existing routes; preserve their auth/header/form dependencies and listener.
 # This supports BOTH an already-running session and the updated notebook's section 6b.
@@ -251,7 +421,7 @@ for quality_route in app.routes:
         quality_route.endpoint = quality_ready
         quality_route.dependant.call = quality_ready
 
-print("Quality v3 installed: evidence-category reports + SAM 2 candidate masks. No paid service created.")
+print("Quality v4 installed: class-aware whole-scene masks + Qwen/SAM fallback. No paid service created.")
 print("Now run section 7, then sections 8 and 9 if the tunnel is not already live. Keep section 10 running for the attended demo.")
 print("Test in the website: 'Outline the visible water bodies and give a detailed report of their spatial pattern and limitations.'")
 print("Loading these models is not evidence of mask accuracy. Inspect real satellite cases and evaluate labelled masks.")

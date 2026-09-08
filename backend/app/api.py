@@ -13,6 +13,7 @@ from app.config import Settings
 from app.core.external_evidence import HistorySearch, WeatherSearch, search_history, search_weather
 from app.errors import NotFoundError, ValidationFailure
 from app.models.gateway import render_rgb_preview
+from app.models.masks import evidence_color
 from app.schemas import (
     AnalysisCreate,
     AnalysisRecord,
@@ -297,7 +298,9 @@ def _draw_overlay(
                 alpha = binary.convert("L").resize(scene.size, Image.Resampling.NEAREST)
             # Zero-valued pixels, including holes, remain completely untouched.
             alpha = alpha.point(lambda value: 105 if value else 0)
-            tint = Image.new("RGB", scene.size, (45, 206, 242))
+            mask_hex = evidence_color(item)
+            mask_color = tuple(bytes.fromhex(mask_hex.removeprefix("#")))
+            tint = Image.new("RGB", scene.size, mask_color)
             scene.paste(tint, (0, 0), alpha)
             draw = ImageDraw.Draw(scene)
             region_count += 1
@@ -306,7 +309,7 @@ def _draw_overlay(
                     _fit_overlay_line(
                         f"MASK {region_count} · {item.label} (candidate)", font, text_width
                     ),
-                    colors[2],
+                    mask_color,
                 )
             )
             continue
@@ -558,7 +561,8 @@ async def download_mask(
     raw = path.read_bytes()
     if colored:
         with Image.open(io.BytesIO(raw)) as mask:
-            image = Image.new("RGBA", mask.size, (45, 206, 242, 0))
+            color = tuple(bytes.fromhex(evidence_color(item).removeprefix("#")))
+            image = Image.new("RGBA", mask.size, (*color, 0))
             image.putalpha(mask.convert("L").point(lambda value: 110 if value else 0))
         stream = io.BytesIO()
         image.save(stream, format="PNG")

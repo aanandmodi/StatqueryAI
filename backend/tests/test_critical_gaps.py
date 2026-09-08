@@ -67,6 +67,17 @@ def test_sensor_qualified_band_identity(tmp_path, platform, names, indexes):
             assert semantic_indexes(source, ["red", "green", "blue"]) == [3, 2, 1]
 
 
+def test_sentinel_swir_band_identity_is_explicit(tmp_path):
+    path = tmp_path / "sentinel-swir.tif"
+    write_raster(
+        path,
+        ["B02", "B03", "B04", "B08", "B11", "B12"],
+        {"SatID": "Sentinel-2"},
+    )
+    with rasterio.open(path) as source:
+        assert semantic_indexes(source, ["nir", "swir1", "swir2"]) == [4, 5, 6]
+
+
 def test_conflicting_color_and_band_name_rejected(tmp_path):
     path = tmp_path / "conflict.tif"
     write_raster(path, ["red", "green", "blue"])

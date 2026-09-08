@@ -37,9 +37,9 @@ flowchart TD
     subgraph Registry ["Specialist Model Registry & Analytical Tools"]
         VLM_Agent["Single-Image VQA & Caption Agent (Qwen3-VL RS-LoRA)"]
         Grd_Agent["Spatial Grounding Agent (Normalized Coordinates & BBox)"]
-        Change_Agent["Bi-Temporal Change-VQA Agent (CDVQA Siamese Encoder)"]
-        Fusion_Agent["Optical + SAR Fusion Agent (TerraMind Dual-Branch)"]
-        Spectral_Tool["Deterministic Spectral Mask Tool (Calibrated NDWI / NDVI)"]
+        Change_Agent["Bi-Temporal Analytical Baseline (Learned Upgrade Release-Gated)"]
+        Fusion_Agent["Optical + SAR Analytical Baseline (Learned Upgrade Release-Gated)"]
+        Spectral_Tool["Sensor-Qualified NDWI / NDVI / NDBI / NBR Tool"]
         Extent_Tool["Mask Extent Comparison Tool (Shrinkage / Flood Inundation m²)"]
     end
     class VLM_Agent,Grd_Agent,Change_Agent,Fusion_Agent agent;
@@ -57,7 +57,7 @@ flowchart TD
     subgraph Presentation ["Evidence Presentation"]
         StructuredUI["Structured Answer UI (Tables, Glowing Badges, Bullets)"]
         RasterViewer["Leaflet Geospatial Canvas (Swipe Comparison & Overlays)"]
-        PDFReport["Official Signed PDF Report (Trace & Provenance)"]
+        PDFReport["Auditable PDF Report (Trace & Provenance)"]
     end
     class StructuredUI,RasterViewer,PDFReport output;
 
@@ -129,27 +129,27 @@ sequenceDiagram
 
     rect rgb(15, 41, 30)
         note over Specialist,Spatial: 2. Specialized Execution Phase
-        Router->>Spatial: Execute NDWI on Time A (Green & NIR bands)
-        Spatial-->>Router: Returns candidate Water Mask A (pixels: 82,000)
+        Router->>Spatial: Execute NDWI on Time A (verified Green & NIR bands)
+        Spatial-->>Router: Returns candidate Water Mask A
         
-        Router->>Spatial: Execute NDWI on Time B (Green & NIR bands)
-        Spatial-->>Router: Returns candidate Water Mask B (pixels: 41,000)
+        Router->>Spatial: Execute NDWI on Time B (verified Green & NIR bands)
+        Spatial-->>Router: Returns candidate Water Mask B
 
-        Router->>Specialist: Run CDVQA Siamese Model on co-registered pair
-        Specialist-->>Router: Returns directional classification ("water area decreased")
+        Router->>Specialist: Run explicitly labelled analytical pair baseline
+        Specialist-->>Router: Returns candidate difference, limits and provenance
 
         Router->>Spatial: Run compare_mask_extent(Mask A, Mask B)
         Spatial->>Spatial: Compute (Mask A & ~Mask B) = Lost water
         Spatial->>Spatial: Compute (Mask B & ~Mask A) = Gained water
-        Spatial-->>Router: Returns Net Area Change: -369,000.0 m² (Shrinkage)
+        Spatial-->>Router: Returns loss/gain; metric area only when CRS/grid support it
     end
 
     rect rgb(49, 16, 24)
         note over Guard: 3. Audit & Anti-Hallucination Phase
         Router->>Guard: Submit raw VLM text + measured mask metrics
         Guard->>Guard: Strip uncorroborated generative numerical claims
-        Guard->>Guard: Inject verified metric facts: -369,000.0 m² gross shrinkage
-        Guard->>Guard: Compute calibrated confidence score (Coverage + Agreement)
+        Guard->>Guard: Inject only computed and source-supported measurements
+        Guard->>Guard: Cap uncalibrated evidence quality; never call it probability
     end
 
     rect rgb(4, 47, 46)
@@ -157,9 +157,9 @@ sequenceDiagram
         Router-->>Web: JSON payload (Structured text, masks, trace, confidence)
         Web->>Web: Render Markdown tables, glowing bullet badges, status tags
         Web->>Web: Overlay GeoTIFF raster with shrinkage masks & swipe comparison
-        User->>Web: Clicks "Download Official PDF Report"
+        User->>Web: Clicks "Download auditable PDF report"
         Web->>PDF: Request compiled analysis export
-        PDF-->>User: Delivers signed PDF with execution trace & evidence table
+        PDF-->>User: Delivers PDF with execution trace & evidence table
     end
 ```
 
@@ -168,8 +168,8 @@ sequenceDiagram
 ## 3. Core Architectural Stages & Responsibilities
 
 ### Stage 1: Ingestion & Sensor Metadata Profiling
-- **Input Scope Validation**: Accepts single GeoTIFF/TIFF or pairs (Optical+SAR or Bi-temporal). PNG/JPEG are strictly limited to evaluation benchmarks.
-- **Sensor Metadata Extraction** ([`backend/app/sensors.py`](../backend/app/sensors.py)): Automatically identifies platform signatures (`Cartosat-2S`, `RISAT-1 / EOS-04`, `Sentinel-1`, `Sentinel-2`) and binds spectral channels (B1=Blue, B2=Green, B3=Red, B4=NIR) and radar polarizations (`HH`, `HV`, `VH`, `VV`).
+- **Input Scope Validation**: Strict analysis accepts GeoTIFF/TIFF with embedded metadata. An explicitly selected exploration profile also accepts PNG/JPEG/WebP as display imagery and withholds metric geospatial claims.
+- **Sensor Metadata Extraction** ([`backend/app/core/sensors.py`](../backend/app/core/sensors.py)): Resolves platform-qualified optical bands and radar polarizations from embedded metadata. A UI label or filename is never proof of band identity.
 - **Georeference Integrity**: Checks Coordinate Reference Systems (EPSG codes), pixel resolution, affine transforms, and flags non-overlapping or unprojected scenes.
 
 ### Stage 2: Agentic Planning & Parameter Sandboxing
@@ -180,17 +180,17 @@ sequenceDiagram
 ### Stage 3: Specialist Agents & Analytical Tools
 - **Remote-Sensing Adapted VLM**: Qwen3-VL 4-bit domain adapter for VQA and captioning.
 - **Spatial Grounding Specialist**: Generates normalized bounding coordinates `[ymin, xmin, ymax, xmax]` for target features.
-- **Bi-Temporal Change Agent**: Siamese dual-branch encoder trained on CDVQA for directional change inference.
-- **Cross-Modal Optical + SAR Fusion**: TerraMind dual-branch cross-attention encoder combining optical color signatures with all-weather radar backscatter.
-- **Deterministic Spectral Tools** ([`backend/app/models/masks.py`](../backend/app/models/masks.py)): Calibrated NDWI and NDVI raster computation directly on source satellite bands.
+- **Bi-Temporal Baseline**: Auditable registered-grid differencing and optional spectral tools. The CDVQA/SECOND learned expert exists as a training path but is not released until a compatible checkpoint passes held-out evaluation.
+- **Optical + SAR Baseline**: Auditable optical-context/backscatter proxy. The TerraMind path is release-gated and currently learns scene labels, not precision fusion masks.
+- **Deterministic Spectral Tools** ([`backend/app/models/masks.py`](../backend/app/models/masks.py)): Sensor-qualified NDWI and NDVI; Sentinel-2-only NDBI/NBR/dNBR because SWIR is required. These are analytical indices, not calibrated semantic probabilities.
 - **Mask Extent Measurement** ([`backend/app/models/mask_comparison.py`](../backend/app/models/mask_comparison.py)): Performs pixel-accurate boolean operations (`left & ~right` for loss, `right & ~left` for gain) and multiplies by ground pixel resolution to yield metric area changes ($m^2$ / hectares).
 
 ### Stage 4: Verification, Auditing & Confidence Estimation
 - **Visual Narrative Guard** ([`backend/app/core/narrative.py`](../backend/app/core/narrative.py)): Intercepts VLM text to remove unmeasured numerical assertions (e.g., hallucinated acreage) unless corroborated by deterministic raster masks.
-- **Multi-Factor Confidence**: Calculates calibrated probability based on four independent metrics: specialist raw score, input image quality, evidence coverage, and cross-branch agreement.
+- **Evidence quality**: Combines bounded quality signals but caps uncalibrated outputs. It becomes a calibrated probability only after a frozen temperature/abstention policy passes an untouched test split.
 - **Observable Execution Trace**: Produces an immutable event log recording `step_id`, `task`, `tool`, `model_version`, `status`, `duration_ms`, and `policy_reason`.
 
 ### Stage 5: Multi-Modal Evidence Delivery
-- **Structured Answer UI** ([`components/structured-answer.tsx`](../components/structured-answer.tsx)): Renders responsive markdown tables, glowing hierarchy headings, custom status badges (`[Verified]`, `[Detected]`, `[High]`), and styled bullet items.
-- **Geospatial Canvas**: Leaflet-powered raster viewer with band switching, candidate mask overlays, and swipe comparison.
+- **Structured Answer UI**: Renders the answer, evidence facts, limitations, trace and per-region classes without upgrading candidate evidence into verification.
+- **Evidence canvas**: Renders class-coloured normalized SVG polygons, with raster-mask fallback and source/overlay comparison.
 - **Auditable PDF Report** ([`backend/app/reporting.py`](../backend/app/reporting.py)): Compiles analysis metadata, structured findings, confidence meters, evidence tables, and the complete execution trace into an exportable PDF document.

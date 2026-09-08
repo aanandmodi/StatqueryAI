@@ -1,5 +1,19 @@
 # Verification and release gates
 
+## Current verified gates — 2026-09-08
+
+| Gate | Result |
+|---|---|
+| Backend + ML | 275 tests passed |
+| Frontend proxy | 10 Node tests passed |
+| Static checks | Ruff, frontend lint and TypeScript passed |
+| Production bundle | Vinext build passed for all local routes |
+| Live single image | `anl_dacb7462e8ec4814bc06919da9169702`; Qwen/SAM, 1 mask, 7 polygons |
+| Live temporal pair | `anl_c73d35849c254c0a8103ef596f50c1b2`; 3 masks, 134 polygons; analytical comparison and metric-area abstention |
+| Live optical/SAR pair | `anl_096e54f5aa65489a9cf5caa0af133441`; analytical proxy, 1 mask, 64 polygons |
+
+Live integration proves transport and artifact contracts, not semantic accuracy or calibration.
+
 ## Critical-gap verification — 2026-09-04
 
 - **269 Python tests passed** (backend/ML CPU suites); **20 Node/proxy tests passed**.
@@ -20,6 +34,13 @@
 - Final local website, case route and readiness returned HTTP 200. Website/backend remain local.
 
 ## Report/mask quality gates
+
+Quality-v4 adds a whole-scene semantic-segmentation route for supported land-cover classes. The
+local suite verifies its API/mask contract and notebook synchronization, but cannot validate GPU
+execution or semantic accuracy. Run `notebooks/SatQuery_SegFormer_LoveDA_Training.ipynb` on Kaggle
+and retain its untouched-validation per-class IoU/Dice, manifest and hashes. The transfer model
+must remain labelled experimental until those artifacts and a representative India/ISRO evaluation
+pass. See [model-quality roadmap](MODEL_QUALITY_ROADMAP.md).
 
 `backend/tests/test_masks_and_reports.py` covers binary-mask holes, background preservation,
 band-gated NDWI, area units, report structure, numeric-claim filtering and API ownership.

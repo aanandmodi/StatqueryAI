@@ -45,6 +45,28 @@ def make_raster(path, *, labelled=True):
     return data[0] > data[1]
 
 
+def make_sentinel_raster(path):
+    data = np.full((6, 64, 64), 100, dtype=np.uint16)
+    data[3] = 110  # NIR baseline
+    data[3, 8:32, 8:32] = 400  # high-NDVI vegetation candidate
+    data[4, 32:56, 32:56] = 450  # high-NDBI built-up candidate
+    data[5, 4:20, 40:60] = 500  # low-NBR candidate
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=64,
+        height=64,
+        count=6,
+        dtype="uint16",
+        crs="EPSG:32644",
+        transform=from_origin(500000, 3200000, 10, 10),
+    ) as target:
+        target.write(data)
+        target.descriptions = ("B02", "B03", "B04", "B08", "B11", "B12")
+        target.update_tags(SatID="Sentinel-2")
+
+
 def output():
     return SpecialistOutput(
         task=TaskType.GROUNDING,
@@ -169,6 +191,63 @@ def test_ndwi_requires_explicit_bands_and_excludes_island(tmp_path, make_asset):
     )
 
 
+@pytest.mark.parametrize(
+    "target,method,class_name",
+    [
+        ("vegetation", "NDVI", "vegetation"),
+        ("built-up", "NDBI", "built-up"),
+        ("burn", "NBR", "burn-scar"),
+    ],
+)
+def test_sensor_qualified_spectral_masks(tmp_path, make_asset, target, method, class_name):
+    path = tmp_path / "sentinel-2.tif"
+    make_sentinel_raster(path)
+    store = SimpleNamespace(resolve=lambda _: path)
+    step = PlannedStep(
+        step_id="step-1",
+        task=TaskType.GROUNDING,
+        asset_ids=["ast_a"],
+        permitted_params={"targets": [target]},
+        policy_reason="test",
+    )
+    actual = spectral_water_output(output(), step, [make_asset("ast_a")], store)
+    assert actual.evidence
+    assert actual.evidence[0].geometry["method"].startswith(method)
+    assert actual.evidence[0].geometry["target"] == class_name
+    assert decode_mask(actual.evidence[0].geometry).any()
+
+
+def test_cartosat_refuses_swir_indexes(tmp_path, make_asset):
+    path = tmp_path / "cartosat.tif"
+    data = np.full((4, 32, 32), 100, dtype=np.uint16)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=32,
+        height=32,
+        count=4,
+        dtype="uint16",
+        crs="EPSG:32644",
+        transform=from_origin(500000, 3200000, 10, 10),
+    ) as target:
+        target.write(data)
+        target.descriptions = ("B1", "B2", "B3", "B4")
+        target.update_tags(SatID="Cartosat-2S")
+    step = PlannedStep(
+        step_id="step-1",
+        task=TaskType.GROUNDING,
+        asset_ids=["ast_a"],
+        permitted_params={"targets": ["built-up"]},
+        policy_reason="test",
+    )
+    actual = spectral_water_output(
+        output(), step, [make_asset("ast_a")], SimpleNamespace(resolve=lambda _: path)
+    )
+    assert not actual.evidence
+    assert any("Cartosat-2-series cannot supply NDBI/NBR" in text for text in actual.warnings)
+
+
 def test_materialization_recomputes_area_and_replaces_url(tmp_path, make_asset):
     path = tmp_path / "scene.tif"
     mask = make_raster(path)
@@ -187,6 +266,8 @@ def test_materialization_recomputes_area_and_replaces_url(tmp_path, make_asset):
     assert items[0].geometry["foreground_pixels"] == 2048
     assert items[0].geometry["area_m2"] == 204800
     assert items[0].geometry["coverage_percent"] == 50
+    assert items[0].geometry["polygons"]
+    assert items[0].geometry["color_hex"] == "#8bd0ff"
     with pytest.raises(ValueError, match="outside"):
         materialize_masks(
             "anl_ab",

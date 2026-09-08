@@ -11,6 +11,7 @@ from rasterio import Affine
 from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 
+from app.core.sensors import semantic_indexes, sensor_profile
 from app.errors import ModelUnavailableError
 from app.models.masks import encode_mask
 from app.schemas import (
@@ -79,6 +80,55 @@ def _read_on_grid(path: Path, grid: ReferenceGrid, *, visual: bool) -> np.ndarra
         ) as aligned:
             data = aligned.read(indexes, masked=True)
             return np.ma.filled(data.astype(np.float32), np.nan)
+
+
+def _read_semantic_on_grid(
+    path: Path, grid: ReferenceGrid, meanings: list[str]
+) -> tuple[np.ndarray, list[int]]:
+    """Read verified reflectance bands and apply declared scale/offset on the common grid."""
+    with rasterio.open(path) as source:
+        indexes = semantic_indexes(source, meanings)
+        if indexes is None:
+            raise ModelUnavailableError(
+                f"Spectral change requires verified {'/'.join(meanings)} bands at both dates"
+            )
+        if source.crs is None or grid.crs is None:
+            data = source.read(
+                indexes,
+                out_shape=(len(indexes), grid.height, grid.width),
+                resampling=Resampling.nearest,
+                masked=True,
+            )
+        else:
+            with WarpedVRT(
+                source,
+                crs=grid.crs,
+                transform=grid.transform,
+                height=grid.height,
+                width=grid.width,
+                dtype="float32",
+                nodata=np.nan,
+                resampling=Resampling.nearest,
+                UNIFIED_SRC_NODATA="NO",
+            ) as aligned:
+                data = aligned.read(indexes, masked=True)
+        values = np.ma.filled(data.astype(np.float32), np.nan)
+        for plane, index in enumerate(indexes):
+            values[plane] = values[plane] * source.scales[index - 1] + source.offsets[index - 1]
+        return values, indexes
+
+
+def _normalized_difference(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    denominator = values[0] + values[1]
+    valid = (
+        np.isfinite(values).all(axis=0)
+        & (values >= 0).all(axis=0)
+        & (denominator > 1e-8)
+    )
+    index = np.divide(
+        values[0] - values[1], denominator, out=np.zeros_like(denominator), where=valid
+    )
+    return index, valid
 
 
 def _shared_valid(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -348,21 +398,36 @@ class LocalPairSpecialistGateway:
             "therefore dominate parts of the difference mask.\n\n"
         )
         answer = (
-            f"Comparison basis: {before.original_name} is time A/before and "
-            f"{after.original_name} is time B/after. The query was: {query.strip()}\n\n"
-            f"Measured change: {changed_fraction:.1%} of shared valid image-grid pixels met the "
-            f"normalized difference threshold {threshold:.3f}. The median selected-band difference "
-            f"was {median_difference:.3f}, the 95th percentile was {p95_difference:.3f}, and the "
-            f"selected pixels show {direction} mean normalized response.\n\n"
-            f"Spatial concentration: the largest shares occur in {concentration}. These names are "
-            "image positions, not compass directions.\n\n"
+            "## Executive finding\n\n"
+            f"The registered-grid screening found candidate change in **{changed_fraction:.1%}** "
+            f"of the shared valid pixels. The strongest selected changes are concentrated in "
+            f"{concentration}. This is a measured image difference, not yet a semantic event "
+            "classification.\n\n"
+            "## Comparison and magnitude\n\n"
+            f"Time A is `{before.original_name}` and time B is `{after.original_name}`. "
+            "Pixels were jointly normalized and compared at threshold "
+            f"**{threshold:.3f}**. The median absolute "
+            f"difference is **{median_difference:.3f}** and the 95th percentile is "
+            f"**{p95_difference:.3f}**. Inside the candidate mask, the mean selected-band response "
+            f"is **{direction}**.\n\n"
+            "## Spatial pattern\n\n"
+            f"The regional distribution is {concentration}. Region names describe positions in the "
+            "display grid; they are not compass bearings or administrative areas. Toggle the mask "
+            "against both originals to separate persistent boundaries from newly appearing or "
+            "disappearing texture.\n\n"
+            "## Plausible explanations—not conclusions\n\n"
+            "Candidate differences may reflect real land-cover change, construction, vegetation "
+            "phenology, inundation or disturbance. They can also be produced by cloud/shadow, "
+            "illumination, seasonal appearance, sensor response or imperfect registration. The "
+            "images alone do not establish which explanation is correct.\n\n"
             f"{visibility_text}"
-            "Interpretation limit: this pixel comparison establishes where selected-band values "
-            "changed. It does not by itself prove flooding, landslide damage, construction, "
-            "deforestation or causality. Confirm candidate regions against cloud-free, "
-            "radiometrically comparable imagery and field or authoritative event data."
+            "## Verification required\n\n"
+            "Confirm acquisition timestamps, sensor/product consistency, co-registration and "
+            "cloud/shadow quality. Compare candidate regions with an independently labelled change "
+            "map or authoritative event record before reporting flooding, damage, deforestation, "
+            "construction or causality."
         )
-        return SpecialistOutput(
+        result = SpecialistOutput(
             task=TaskType.CHANGE_VQA,
             text=answer,
             facts=[
@@ -404,9 +469,124 @@ class LocalPairSpecialistGateway:
                 "Use the CDVQA-trained change expert after it passes the prescribed public split.",
             ],
         )
+        return self._append_dnbr(result, step, before, after, grid)
+
+    def _append_dnbr(
+        self,
+        output: SpecialistOutput,
+        step: PlannedStep,
+        before: AssetRecord,
+        after: AssetRecord,
+        grid: ReferenceGrid,
+    ) -> SpecialistOutput:
+        targets = {str(item).lower() for item in step.permitted_params.get("targets", [])}
+        if not targets & {"burn", "burn-scar", "burned"}:
+            return output
+        if any(
+            asset.modality not in {Modality.OPTICAL, Modality.MULTISPECTRAL}
+            for asset in (before, after)
+        ):
+            return output.model_copy(
+                update={
+                    "warnings": [
+                        *output.warnings,
+                        "dNBR unavailable: both dates must be optical/multispectral Sentinel-2.",
+                    ]
+                }
+            )
+        with rasterio.open(self.asset_store.resolve(before.id)) as source_before:
+            before_platform = sensor_profile(source_before)["platform"]
+        with rasterio.open(self.asset_store.resolve(after.id)) as source_after:
+            after_platform = sensor_profile(source_after)["platform"]
+        if {before_platform, after_platform} != {"sentinel-2"}:
+            return output.model_copy(
+                update={
+                    "warnings": [
+                        *output.warnings,
+                        "dNBR unavailable: Cartosat-2-series has no SWIR band; both dates need "
+                        "verified Sentinel-2 NIR/SWIR2 metadata.",
+                    ]
+                }
+            )
+
+        before_values, before_indexes = _read_semantic_on_grid(
+            self.asset_store.resolve(before.id), grid, ["nir", "swir2"]
+        )
+        after_values, after_indexes = _read_semantic_on_grid(
+            self.asset_store.resolve(after.id), grid, ["nir", "swir2"]
+        )
+        before_nbr, before_valid = _normalized_difference(before_values)
+        after_nbr, after_valid = _normalized_difference(after_values)
+        valid = before_valid & after_valid
+        dnbr = before_nbr - after_nbr
+        threshold = float(step.permitted_params.get("threshold", 0.1))
+        candidate = valid & (dnbr >= threshold)
+        severity_bounds = {
+            "unburned_or_regrowth": (-np.inf, 0.1),
+            "low": (0.1, 0.27),
+            "moderate_low": (0.27, 0.44),
+            "moderate_high": (0.44, 0.66),
+            "high": (0.66, np.inf),
+        }
+        severity = {
+            name: round(
+                float((valid & (dnbr >= lower) & (dnbr < upper)).sum() / max(1, valid.sum())),
+                6,
+            )
+            for name, (lower, upper) in severity_bounds.items()
+        }
+        evidence = list(output.evidence)
+        if candidate.any():
+            evidence.append(
+                EvidenceItem(
+                    id=f"ev_{uuid4().hex}",
+                    type="mask",
+                    label=(
+                        "dNBR burn-severity candidate · "
+                        f"{candidate.sum() / max(1, valid.sum()):.1%}"
+                    ),
+                    score=min(output.raw_score, 0.58),
+                    coordinate_space="pixel",
+                    asset_id=after.id,
+                    geometry={
+                        "encoding": "png-base64",
+                        "data": encode_mask(candidate),
+                        "width": grid.width,
+                        "height": grid.height,
+                        "method": "dNBR = pre-fire NBR - post-fire NBR",
+                        "target": "burn-scar",
+                        "threshold": threshold,
+                        "status": "candidate",
+                        "comparison_asset_id": before.id,
+                        "before_band_indexes": before_indexes,
+                        "after_band_indexes": after_indexes,
+                    },
+                )
+            )
+        return output.model_copy(
+            update={
+                "text": (
+                    output.text
+                    + "\n\nSentinel-2 dNBR addendum: candidate severity was computed from verified "
+                    f"NIR/SWIR2 bands using threshold {threshold:.3f}. Review class fractions in "
+                    "the facts table; these screening classes are not an insurance or damage "
+                    "determination."
+                ),
+                "facts": [
+                    *output.facts,
+                    {"name": "dnbr_threshold", "value": threshold},
+                    {"name": "dnbr_severity_fraction", "value": severity},
+                ],
+                "evidence": evidence,
+                "warnings": [
+                    *output.warnings,
+                    "dNBR severity thresholds are screening conventions; atmospheric correction, "
+                    "phenology, clouds, registration and local validation remain required.",
+                ],
+            }
+        )
 
     def _fusion(self, step: PlannedStep, assets: list[AssetRecord], query: str) -> SpecialistOutput:
-        del query
         optical = next(
             item for item in assets if item.modality in {Modality.OPTICAL, Modality.MULTISPECTRAL}
         )
@@ -445,13 +625,18 @@ class LocalPairSpecialistGateway:
         dark_optical = float(np.percentile(valid_luminance, 35.0))
         strong_edge = float(np.percentile(valid_edges, 65.0))
         blue_dominance = rgb[2] > (rgb[0] * 1.05)
-        water = valid & (backscatter <= low_sar) & ((luminance <= dark_optical) | blue_dominance)
-        built_up = (
-            edge_valid
-            & (backscatter >= high_sar)
-            & (edges > strong_edge)
-            & (luminance >= dark_optical)
+        sar_low_return = valid & (backscatter <= low_sar)
+        optical_water_cue = valid & ((luminance <= dark_optical) | blue_dominance)
+        water = sar_low_return & optical_water_cue
+        water_disagreement = valid & (sar_low_return ^ optical_water_cue)
+        sar_high_return = valid & (backscatter >= high_sar)
+        optical_structure_cue = edge_valid & (edges > strong_edge) & (
+            luminance >= dark_optical
         )
+        built_up = (
+            sar_high_return & optical_structure_cue
+        )
+        structure_disagreement = valid & (sar_high_return ^ optical_structure_cue)
         masks = {"water proxy": water, "built-up proxy": built_up}
         requested = {str(item).lower() for item in step.permitted_params.get("targets", [])}
         selected_names = [
@@ -478,23 +663,57 @@ class LocalPairSpecialistGateway:
             if item:
                 item.geometry["comparison_asset_id"] = sar.id
                 evidence.append(item)
-        summary = "; ".join(f"{name}: {fraction:.1%}" for name, fraction in fractions.items())
+        valid_count = max(1, valid.sum())
+        agreement = {
+            "water_joint_fraction": float(water.sum() / valid_count),
+            "water_cue_disagreement_fraction": float(
+                water_disagreement.sum() / valid_count
+            ),
+            "built_up_joint_fraction": float(built_up.sum() / valid_count),
+            "structure_cue_disagreement_fraction": float(
+                structure_disagreement.sum() / valid_count
+            ),
+        }
+        summary = "; ".join(
+            f"{name}: {fraction:.1%}" for name, fraction in fractions.items()
+        )
         return SpecialistOutput(
             task=TaskType.OPTICAL_SAR_FUSION,
             text=(
-                "The aligned optical/SAR analytical baseline combined visible-context cues with "
-                f"relative SAR backscatter and produced these proxy coverages: {summary}. "
-                "The masks identify candidate pixels on the optical reference grid, not confirmed "
-                "land-cover labels. Optical colors and texture supply visible context; relative "
-                "SAR backscatter contributes a separate signal. No missing optical pixels have "
-                "been reconstructed. Low backscatter can also come from shadow or smooth dry "
-                "surfaces; bright returns can be influenced by geometry and roughness. Sensor "
-                "calibration, polarization, acquisition dates and registration must be reviewed "
-                "before interpreting these proxies as water, vegetation or built structures."
+                "## Executive finding\n\n"
+                "The optical and SAR inputs were compared on the optical reference grid. Their "
+                f"joint analytical candidates are **{summary}**. These are proxy coverages, not "
+                "confirmed land-cover labels.\n\n"
+                "## What each sensor contributed\n\n"
+                "The optical branch contributed visible brightness, colour and edge/texture cues. "
+                "The SAR branch contributed relative low- and high-return patterns. The system "
+                "selected a pixel only where the relevant cues agreed; it did not reconstruct "
+                "missing optical information or treat radar intensity as colour.\n\n"
+                "## Agreement and disagreement\n\n"
+                f"Joint water-like cues cover **{agreement['water_joint_fraction']:.1%}** of valid "
+                f"pixels, while the two water cues disagree on "
+                f"**{agreement['water_cue_disagreement_fraction']:.1%}**. Joint structure-like "
+                f"cues cover **{agreement['built_up_joint_fraction']:.1%}**, with structural-cue "
+                f"disagreement on **{agreement['structure_cue_disagreement_fraction']:.1%}**. "
+                "Disagreement is useful review evidence, not an error to hide.\n\n"
+                "## Interpretation limits\n\n"
+                "Low SAR return can represent smooth water, radar shadow or other smooth surfaces. "
+                "High return can arise from buildings, rough terrain, vegetation structure, "
+                "incidence geometry or speckle. Optical darkness can be water, shadow or dark "
+                "material. Therefore the overlay marks candidates only.\n\n"
+                "## Verification required\n\n"
+                f"The user asked: {query.strip()} Review polarization, calibration, "
+                "incidence angle, "
+                "acquisition times, co-registration and independent labels. Use a released learned "
+                "fusion checkpoint only after it passes held-out optical/SAR segmentation tests."
             ),
             facts=[
                 {"name": name.replace(" ", "_"), "value": round(value, 6)}
                 for name, value in fractions.items()
+            ]
+            + [
+                {"name": name, "value": round(value, 6)}
+                for name, value in agreement.items()
             ]
             + [{"name": "valid_pixel_fraction", "value": round(float(valid.mean()), 6)}],
             evidence=evidence,

@@ -83,7 +83,11 @@ print(
 # ## 1. Configuration — edit only this cell first
 #
 # The default profile is deliberately small enough for a free T4 while still exercising all four
-# BigEarthNet.txt task types. Increase caps only after one end-to-end run succeeds.
+# BigEarthNet.txt task types. Increase caps only after one end-to-end run succeeds. Do not set a
+# global `70%` target: the publisher corpus contains millions of image-text triplets, while this
+# notebook has only the matching Lithuania LMDB image subset. Coverage must be calculated over
+# uniquely matched, scene-isolated images—not over text-row duplicates. Grow caps in staged runs,
+# compare base/LoRA on the untouched split, and stop when the held-out metrics plateau.
 
 # %%
 from dataclasses import asdict, dataclass
