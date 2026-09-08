@@ -21,9 +21,20 @@
 /.vinext/
 /out/
 
-# misc
+# misc & security
 .DS_Store
 *.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+*.secret
+*.credentials
+credentials.json
+client_secret*.json
+service-account*.json
+.openai/
 
 # debug
 npm-debug.log*
