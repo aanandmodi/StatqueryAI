@@ -1,24 +1,26 @@
 'use client';
 
 import {
+  Activity,
   AlertTriangle,
   ArrowDownToLine,
   ArrowUpRight,
-  Boxes,
+  BarChart3,
   Check,
-  CircleDot,
+  FileClock,
   FileImage,
+  Focus,
   Layers3,
   LoaderCircle,
-  Map,
+  Minus,
   Orbit,
+  Plus,
   RadioTower,
-  ScanSearch,
+  ShieldCheck,
   UploadCloud,
   X,
 } from 'lucide-react';
 import Image from 'next/image';
-import Link from 'next/link';
 import {
   ChangeEvent,
   CSSProperties,
@@ -29,7 +31,15 @@ import {
 } from 'react';
 
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { StructuredAnswer } from '@/components/structured-answer';
+import { StudioNav } from '@/components/studio-nav';
 import { jsonRequest } from '@/lib/api-client';
 
 type Task =
@@ -116,26 +126,26 @@ type AssetRecord = {
 type Readiness = { status: string; checks: Record<string, boolean> };
 
 const taskOptions: Array<{ value: Task; label: string; note: string }> = [
-  { value: 'single_vqa', label: 'Ask one scene', note: 'Qwen3-VL · released' },
+  { value: 'single_vqa', label: 'Ask one scene', note: 'Vision-language route' },
   {
     value: 'caption',
     label: 'Describe the scene',
-    note: 'Qwen3-VL · released',
+    note: 'Vision-language route',
   },
   {
     value: 'grounding',
     label: 'Locate a feature',
-    note: 'Qwen3-VL · released',
+    note: 'Grounding and mask route',
   },
   {
     value: 'change_vqa',
     label: 'Compare two dates',
-    note: 'Local analytical baseline · runnable',
+    note: 'Controller-advertised paired route',
   },
   {
     value: 'optical_sar_fusion',
     label: 'Fuse optical + SAR',
-    note: 'Local analytical baseline · runnable',
+    note: 'Controller-advertised fusion route',
   },
 ];
 
@@ -258,6 +268,7 @@ function EvidenceOverlay({ item }: { item: EvidenceItem }) {
 }
 
 export default function Home() {
+  const canvasRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const secondInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -295,11 +306,9 @@ export default function Home() {
   const [inputProfile, setInputProfile] = useState<'strict' | 'exploration'>(
     'exploration',
   );
-  const [outputView, setOutputView] = useState<'evidence' | 'report' | 'trace'>(
-    'evidence',
-  );
   const [sideBySide, setSideBySide] = useState(false);
   const [maskOpacity, setMaskOpacity] = useState(0.8);
+  const [canvasZoom, setCanvasZoom] = useState(1);
   const displayFormats =
     inputProfile === 'exploration' &&
     (inputMode === 'fusion' || modality === 'optical');
@@ -338,6 +347,34 @@ export default function Home() {
       ? 'Accuracy not calibrated'
       : `${Math.round(result.confidence.score * 100)}% calibrated`
     : 'No score calculated';
+  const maskEvidence = visibleEvidence.filter((item) => item.type === 'mask');
+  const measuredArea = maskEvidence.find(
+    (item) =>
+      typeof item.geometry.area_m2 === 'number' &&
+      Number.isFinite(item.geometry.area_m2),
+  );
+  const coverageEvidence = maskEvidence.find(
+    (item) =>
+      typeof item.geometry.coverage_percent === 'number' &&
+      Number.isFinite(item.geometry.coverage_percent),
+  );
+  const evidenceClasses = Array.from(
+    new Set(
+      visibleEvidence.map((item) => {
+        const value = item.geometry.class_name;
+        return typeof value === 'string' && value.trim()
+          ? value.trim().toLowerCase()
+          : 'unknown';
+      }),
+    ),
+  );
+
+  async function toggleCanvasFullscreen() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await canvas.requestFullscreen();
+  }
 
   const displayTrace = useMemo(() => {
     if (result?.trace.length) return result.trace;
@@ -641,21 +678,20 @@ export default function Home() {
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
 
+      <StudioNav active="/" />
+
       <header className="topbar glass-panel">
         <a className="brand" href="#workspace" aria-label="SatQuery home">
-          <span className="brand-mark">
-            <Orbit />
-          </span>
           <span>
             <strong>
               SATQUERY<span className="brand-period">.</span>
             </strong>
-            <small>Earth evidence studio</small>
+            <small>Earth insights · auditable by design</small>
           </span>
         </a>
         <div className="project-switcher" aria-label="Current workspace">
-          <span className="status-dot" />
-          Local investigation workspace
+          <span>Active case</span>
+          <strong>{analysis ? analysis.id : 'New investigation'}</strong>
         </div>
         <div className="topbar-actions">
           <span className={`live-pill ${systemState}`} title={systemDetail}>
@@ -665,62 +701,34 @@ export default function Home() {
               <RadioTower size={13} />
             )}
             {systemState === 'ready'
-              ? 'Local controller ready'
+              ? 'Services online'
               : systemState === 'checking'
                 ? 'Checking systems'
                 : systemState === 'degraded'
                   ? 'Controller reachable · not ready'
                   : 'Local services offline'}
           </span>
-          <span className="zero-cost-badge">Local-first · ₹0</span>
+          <span className="zero-cost-badge">Local-first · zero-cost path</span>
         </div>
       </header>
 
       <section className="workspace" id="workspace">
-        <aside className="rail glass-panel" aria-label="Workspace sections">
-          <nav>
-            <a
-              className="rail-item active"
-              href="#query-card"
-              aria-label="Query workspace"
-            >
-              <ScanSearch />
-              <span>Query</span>
-            </a>
-            <Link className="rail-item" href="/cases" aria-label="Casebook">
-              <Boxes />
-              <span>Cases</span>
-            </Link>
-            <Link
-              className="rail-item"
-              href="/archive"
-              aria-label="Historical evidence"
-            >
-              <Map />
-              <span>Archive</span>
-            </Link>
-            <Link
-              className="rail-item"
-              href="/method"
-              aria-label="Methods and limits"
-            >
-              <Layers3 />
-              <span>Methods</span>
-            </Link>
-          </nav>
-          <div className="rail-orbit" aria-hidden="true">
-            <span />
-            <CircleDot />
-          </div>
-        </aside>
-
         <div className="main-column">
-          <div className="eyebrow">01 / Investigation</div>
+          <div className="eyebrow">Source workspace</div>
           <div className="heading-row">
             <div>
-              <h1>Read the changing Earth.</h1>
-              <p>Inspect a scene. Compare dates. Follow the evidence.</p>
+              <span className="workspace-kicker">New investigation</span>
+              <h1>Evidence desk</h1>
+              <p>Build an inspectable source set before interpretation.</p>
             </div>
+          </div>
+
+          <div className="workflow-ribbon" aria-label="Analysis workflow">
+            <div className="active"><span>01</span><strong>Configure</strong></div>
+            <i aria-hidden="true" />
+            <div className={file ? 'active' : ''}><span>02</span><strong>Attach</strong></div>
+            <i aria-hidden="true" />
+            <div className={analysis ? 'active' : ''}><span>03</span><strong>Interpret</strong></div>
           </div>
 
           <section
@@ -732,7 +740,7 @@ export default function Home() {
               <div>
                 <span className="step-number">01</span>
                 <div>
-                  <h2 id="query-title">Evidence set</h2>
+                  <h2 id="query-title">Evidence contract</h2>
                   <p>50 MB per file · originals preserved locally</p>
                 </div>
               </div>
@@ -740,20 +748,27 @@ export default function Home() {
 
             <div className="task-picker">
               <label htmlFor="input-profile">Input profile</label>
-              <select
-                id="input-profile"
+              <Select
                 value={inputProfile}
                 disabled={busy}
-                onChange={(e) => {
-                  setInputProfile(e.target.value as 'strict' | 'exploration');
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setInputProfile(value as 'strict' | 'exploration');
                   clearFile();
                 }}
               >
-                <option value="exploration">
-                  Exploration · JPG / PNG / WebP / TIFF
-                </option>
-                <option value="strict">SIH strict · geospatial TIFF</option>
-              </select>
+                <SelectTrigger id="input-profile" className="studio-select-trigger">
+                  <SelectValue>{inputProfile === 'exploration' ? 'Exploration · common formats' : 'SIH strict · GeoTIFF'}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className="studio-select-content" align="start">
+                  <SelectItem value="exploration" className="studio-select-item">
+                    <span className="select-option-copy"><strong>Exploration</strong><small>JPG · PNG · WebP · TIFF</small></span>
+                  </SelectItem>
+                  <SelectItem value="strict" className="studio-select-item">
+                    <span className="select-option-copy"><strong>SIH strict</strong><small>Geospatial TIFF contract</small></span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <p className="field-note">
               {inputMode === 'fusion'
@@ -767,11 +782,11 @@ export default function Home() {
 
             <div className="task-picker evidence-mode-picker">
               <label htmlFor="input-mode">Evidence set</label>
-              <select
-                id="input-mode"
+              <Select
                 value={inputMode}
-                onChange={(event) => {
-                  const nextMode = event.target.value as InputMode;
+                onValueChange={(value) => {
+                  if (!value) return;
+                  const nextMode = value as InputMode;
                   setInputMode(nextMode);
                   setModality(
                     nextMode === 'fusion' ? 'multispectral' : 'optical',
@@ -782,12 +797,15 @@ export default function Home() {
                 }}
                 disabled={busy}
               >
-                <option value="single">
-                  One optical, multispectral, or SAR scene
-                </option>
-                <option value="temporal">Bi-temporal co-registered pair</option>
-                <option value="fusion">Co-registered optical + SAR pair</option>
-              </select>
+                <SelectTrigger id="input-mode" className="studio-select-trigger">
+                  <SelectValue>{inputMode === 'single' ? 'Single scene' : inputMode === 'temporal' ? 'Bi-temporal pair' : 'Optical + SAR pair'}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className="studio-select-content" align="start">
+                  <SelectItem value="single" className="studio-select-item"><span className="select-option-copy"><strong>Single scene</strong><small>Optical, multispectral or SAR</small></span></SelectItem>
+                  <SelectItem value="temporal" className="studio-select-item"><span className="select-option-copy"><strong>Bi-temporal pair</strong><small>Co-registered before and after</small></span></SelectItem>
+                  <SelectItem value="fusion" className="studio-select-item"><span className="select-option-copy"><strong>Optical + SAR</strong><small>Co-registered sensor pair</small></span></SelectItem>
+                </SelectContent>
+              </Select>
               <span>
                 {inputMode === 'single' ? '1 raster' : '2 aligned rasters'}
               </span>
@@ -801,23 +819,25 @@ export default function Home() {
                     ? 'Optical modality'
                     : 'Scene modality'}
               </label>
-              <select
-                id="modality"
+              <Select
                 value={modality}
-                onChange={(event) =>
-                  setModality(event.target.value as Modality)
-                }
+                onValueChange={(value) => value && setModality(value as Modality)}
                 disabled={busy}
               >
+                <SelectTrigger id="modality" className="studio-select-trigger">
+                  <SelectValue>{inputMode === 'fusion' && modality === 'optical' ? 'Optical RGB' : modality === 'sar' ? 'SAR' : modality === 'multispectral' ? 'Multispectral' : 'Optical'}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className="studio-select-content" align="start">
                 {inputMode !== 'fusion' && (
-                  <option value="optical">Optical</option>
+                  <SelectItem value="optical" className="studio-select-item"><span className="select-option-copy"><strong>Optical</strong><small>Visible colour imagery</small></span></SelectItem>
                 )}
-                <option value="multispectral">Multispectral</option>
-                {inputMode !== 'fusion' && <option value="sar">SAR</option>}
+                <SelectItem value="multispectral" className="studio-select-item"><span className="select-option-copy"><strong>Multispectral</strong><small>Declared spectral bands</small></span></SelectItem>
+                {inputMode !== 'fusion' && <SelectItem value="sar" className="studio-select-item"><span className="select-option-copy"><strong>SAR</strong><small>Radar intensity imagery</small></span></SelectItem>}
                 {inputMode === 'fusion' && (
-                  <option value="optical">Optical RGB</option>
+                  <SelectItem value="optical" className="studio-select-item"><span className="select-option-copy"><strong>Optical RGB</strong><small>Visible reference source</small></span></SelectItem>
                 )}
-              </select>
+                </SelectContent>
+              </Select>
               <span>Declared, never guessed</span>
             </div>
 
@@ -951,30 +971,23 @@ export default function Home() {
 
             <div className="task-picker">
               <label htmlFor="task">Specialist route</label>
-              <select
-                id="task"
+              <Select
                 value={route}
-                onChange={(event) =>
-                  setRoute(event.target.value as RouteChoice)
-                }
+                onValueChange={(value) => value && setRoute(value as RouteChoice)}
                 disabled={busy}
               >
-                <option value="auto">
-                  Auto route from question + validated inputs
-                </option>
-                {taskOptions.map((option) => (
-                  <option
-                    key={option.value}
-                    value={option.value}
-                    disabled={
-                      !availableTasks.includes(option.value) ||
-                      !compatibleTasks.has(option.value)
-                    }
-                  >
-                    {option.label} — {option.note}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="task" className="studio-select-trigger">
+                  <SelectValue>{route === 'auto' ? 'Automatic specialist' : selectedOption?.label}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className="studio-select-content route-select-content" align="start">
+                  <SelectItem value="auto" className="studio-select-item"><span className="select-option-copy"><strong>Automatic specialist</strong><small>Question + validated input routing</small></span></SelectItem>
+                  {taskOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value} disabled={!availableTasks.includes(option.value) || !compatibleTasks.has(option.value)} className="studio-select-item">
+                      <span className="select-option-copy"><strong>{option.label}</strong><small>{option.note}</small></span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <span>
                 {selectedOption?.note || 'Policy router · observable'}
               </span>
@@ -1073,6 +1086,7 @@ export default function Home() {
                 id="query"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
+                placeholder="Ask about visible land cover, locate a feature, compare aligned dates, or fuse optical and SAR evidence…"
                 disabled={busy}
                 maxLength={2000}
                 aria-describedby="query-help"
@@ -1145,27 +1159,22 @@ export default function Home() {
         </div>
 
         <aside className="insight-column" aria-label="Analysis output">
-          <div className="output-tabs" aria-label="Output view">
-            {(['evidence', 'report', 'trace'] as const).map((view) => (
-              <button
-                key={view}
-                type="button"
-                aria-pressed={outputView === view}
-                onClick={() => setOutputView(view)}
-              >
-                {view === 'evidence'
-                  ? 'Scene inspector'
-                  : view === 'report'
-                    ? 'Analysis report'
-                    : 'Execution trace'}
-              </button>
-            ))}
-            {analysis && <a href={`/cases/${analysis.id}`}>Open case ↗</a>}
+          <div className="studio-commandbar">
+            <div>
+              <span className="eyebrow">Orbital Intelligence Studio</span>
+              <strong>
+                {asset ? asset.original_name : 'No evidence loaded'}
+              </strong>
+            </div>
+            <div>
+              {asset?.metadata?.crs && <code>{asset.metadata.crs}</code>}
+              {analysis && <a href={`/cases/${analysis.id}`}>Open case ↗</a>}
+            </div>
           </div>
           <section
-            hidden={outputView !== 'evidence'}
             className="evidence-card glass-panel"
             id="evidence"
+            ref={canvasRef}
           >
             <div className="section-label">
               <span>
@@ -1176,21 +1185,55 @@ export default function Home() {
               </span>
               <span>{visibleEvidence.length} regions in selected scene</span>
             </div>
+            <div className="canvas-toolbar" aria-label="Scene controls">
+              <button
+                type="button"
+                onClick={() => setCanvasZoom((value) => Math.max(1, value - 0.25))}
+                disabled={!asset || canvasZoom <= 1}
+                aria-label="Zoom out"
+              >
+                <Minus />
+              </button>
+              <output>{Math.round(canvasZoom * 100)}%</output>
+              <button
+                type="button"
+                onClick={() => setCanvasZoom((value) => Math.min(3, value + 0.25))}
+                disabled={!asset || canvasZoom >= 3}
+                aria-label="Zoom in"
+              >
+                <Plus />
+              </button>
+              <button
+                type="button"
+                onClick={() => setCanvasZoom(1)}
+                disabled={!asset}
+                aria-label="Reset scene zoom"
+              >
+                <Focus />
+              </button>
+              <button
+                type="button"
+                onClick={() => void toggleCanvasFullscreen()}
+                disabled={!asset}
+                aria-label="Open scene fullscreen"
+              >
+                <Layers3 />
+              </button>
+            </div>
             {assets.length > 0 && (
               <div className="evidence-selector">
                 <label htmlFor="evidence-asset">Preview source</label>
-                <select
-                  id="evidence-asset"
+                <Select
                   value={asset?.id ?? ''}
-                  onChange={(event) => setSelectedAssetId(event.target.value)}
+                  onValueChange={(value) => value && setSelectedAssetId(value)}
                 >
+                  <SelectTrigger id="evidence-asset" className="canvas-select-trigger"><SelectValue>{asset ? `${asset.role.replaceAll('_', ' ')} · ${asset.original_name}` : 'Select source'}</SelectValue></SelectTrigger>
+                  <SelectContent className="studio-select-content" align="start">
                   {assets.map((source) => (
-                    <option key={source.id} value={source.id}>
-                      {source.role.replaceAll('_', ' ')} ·{' '}
-                      {source.original_name}
-                    </option>
+                    <SelectItem className="studio-select-item" key={source.id} value={source.id}><span className="select-option-copy"><strong>{source.role.replaceAll('_', ' ')}</strong><small>{source.original_name}</small></span></SelectItem>
                   ))}
-                </select>
+                  </SelectContent>
+                </Select>
               </div>
             )}
             {assets.length === 2 && (
@@ -1226,6 +1269,7 @@ export default function Home() {
                         fill
                         unoptimized
                         sizes="40vw"
+                        style={{ transform: `scale(${canvasZoom})` }}
                       />
                       {showOverlay &&
                         result?.evidence
@@ -1259,11 +1303,37 @@ export default function Home() {
                     fill
                     sizes="(max-width: 1050px) 60vw, 38vw"
                     unoptimized
+                    style={{ transform: `scale(${canvasZoom})` }}
                   />
                 ) : (
-                  <div className="empty-orbit" aria-hidden="true">
-                    <Orbit />
-                    <span>Awaiting scene</span>
+                  <div className="empty-canvas-state">
+                    <span className="canvas-corner corner-nw" aria-hidden="true" />
+                    <span className="canvas-corner corner-ne" aria-hidden="true" />
+                    <span className="canvas-corner corner-sw" aria-hidden="true" />
+                    <span className="canvas-corner corner-se" aria-hidden="true" />
+                    <div className="empty-scan-field" aria-hidden="true">
+                      <span className="orbit-ring ring-one" />
+                      <span className="orbit-ring ring-two" />
+                      <span className="orbit-ring ring-three" />
+                      <span className="orbit-axis axis-x" />
+                      <span className="orbit-axis axis-y" />
+                      <span className="orbit-node node-one" />
+                      <span className="orbit-node node-two" />
+                      <span className="empty-signal-core"><Orbit /></span>
+                    </div>
+                    <div className="empty-canvas-copy">
+                      <span>Evidence channel open</span>
+                      <strong>Bring a scene into focus.</strong>
+                      <p>Attach one source—or a verified pair—to unlock source-locked inspection.</p>
+                      <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
+                        <UploadCloud /> Choose evidence
+                      </button>
+                    </div>
+                    <div className="canvas-capabilities" aria-label="Accepted evidence modes">
+                      <span>Single scene</span><i />
+                      <span>Temporal pair</span><i />
+                      <span>Optical + SAR</span>
+                    </div>
                   </div>
                 )}
                 <div className="map-grid" />
@@ -1276,7 +1346,25 @@ export default function Home() {
                     No source loaded · no invented map
                   </div>
                 )}
+                {asset && (
+                  <div className="map-coordinates">
+                    {asset.metadata
+                      ? `${asset.metadata.width} × ${asset.metadata.height}${asset.metadata.crs ? ` · ${asset.metadata.crs}` : ' · no CRS supplied'}`
+                      : 'Raster metadata unavailable'}
+                  </div>
+                )}
               </figure>
+            )}
+            {evidenceClasses.length > 0 && (
+              <div className="map-legend" aria-label="Evidence class legend">
+                <strong>Returned layers</strong>
+                {evidenceClasses.map((name) => (
+                  <span key={name}>
+                    <i style={{ background: evidencePalette[name] ?? evidencePalette.unknown }} />
+                    {name}
+                  </span>
+                ))}
+              </div>
             )}
             {result && (
               <div className="mask-controls">
@@ -1335,39 +1423,61 @@ export default function Home() {
                   ))}
               </div>
             )}
-          </section>
-
-          {outputView === 'evidence' && (
-            <div className="inspector-summary">
-              <span>
-                {phase === 'succeeded'
-                  ? 'Analysis ready'
-                  : 'Evidence before interpretation'}
-              </span>
-              <p>
-                {result
-                  ? (() => {
-                      const clean = result.answer
-                        .replace(/^#+\s+/gm, '')
-                        .replace(/\|[^\n]+\|/g, '')
-                        .replace(/[*`_~]/g, '')
-                        .replace(/\s+/g, ' ')
-                        .trim();
-                      return clean.slice(0, 240) + (clean.length > 240 ? '…' : '');
-                    })()
-                  : 'Upload a source on the left. Candidate masks, measured coverage and source-aligned comparison appear here.'}
-              </p>
-              <button type="button" onClick={() => setOutputView('report')}>
-                Read full report →
-              </button>
+            <div className="scene-timeline" aria-label="Uploaded evidence sequence">
+              <div className="timeline-heading">
+                <FileClock />
+                <span>Evidence sequence</span>
+                <strong>{assets.length} source{assets.length === 1 ? '' : 's'}</strong>
+              </div>
+              {assets.length ? (
+                <div className="timeline-items">
+                  {assets.map((source, index) => (
+                    <button
+                      key={source.id}
+                      type="button"
+                      aria-pressed={asset?.id === source.id}
+                      onClick={() => setSelectedAssetId(source.id)}
+                    >
+                      <span className="timeline-preview">
+                        <Image
+                          src={`/api/satquery/assets/${source.id}/preview`}
+                          alt=""
+                          fill
+                          unoptimized
+                          sizes="100px"
+                        />
+                      </span>
+                      <span>
+                        <small>{source.role.replaceAll('_', ' ')}</small>
+                        <strong>{source.original_name}</strong>
+                        <em>
+                          {source.metadata
+                            ? `${source.metadata.width} × ${source.metadata.height}`
+                            : 'Metadata unavailable'}
+                        </em>
+                      </span>
+                      <i>{String(index + 1).padStart(2, '0')}</i>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="timeline-empty">
+                  <span><FileClock /></span>
+                  <div><strong>Sequence waiting for evidence</strong><p>Validated source roles and dimensions will appear here.</p></div>
+                </div>
+              )}
             </div>
-          )}
+          </section>
           <section
-            hidden={outputView !== 'report'}
             className={`answer-card glass-panel ${phase}`}
             id="answer"
             aria-live="polite"
           >
+            <div className="report-heading">
+              <span className="eyebrow">Evidence-led output</span>
+              <h1>Intelligence brief</h1>
+              <p>Satellite data · human context · inspectable provenance</p>
+            </div>
             <div className="answer-topline">
               <span>
                 {phase === 'succeeded'
@@ -1380,9 +1490,9 @@ export default function Home() {
               </span>
               <strong>{confidenceLabel}</strong>
             </div>
-            <h2>
+            <h2 className="executive-title">
               {result
-                ? 'Visual interpretation'
+                ? 'Executive assessment'
                 : busy
                   ? analysis
                     ? statusCopy[analysis.status]
@@ -1391,6 +1501,32 @@ export default function Home() {
                     ? 'No model answer was produced.'
                     : 'Your evidence-backed answer will appear here.'}
             </h2>
+            {result && (measuredArea || coverageEvidence) && (
+              <div className="report-measures">
+                {measuredArea && (
+                  <div>
+                    <BarChart3 />
+                    <span>Measured candidate area</span>
+                    <strong>
+                      {Number(measuredArea.geometry.area_m2) >= 1_000_000
+                        ? `${(Number(measuredArea.geometry.area_m2) / 1_000_000).toFixed(3)} km²`
+                        : `${Number(measuredArea.geometry.area_m2).toLocaleString(undefined, { maximumFractionDigits: 1 })} m²`}
+                    </strong>
+                    <small>{measuredArea.label} · model-derived boundary</small>
+                  </div>
+                )}
+                {coverageEvidence && (
+                  <div>
+                    <Activity />
+                    <span>Selected-grid coverage</span>
+                    <strong>
+                      {Number(coverageEvidence.geometry.coverage_percent).toFixed(2)}%
+                    </strong>
+                    <small>{coverageEvidence.label} · not confidence</small>
+                  </div>
+                )}
+              </div>
+            )}
             {result && (
               <StructuredAnswer
                 content={result.answer}
@@ -1413,6 +1549,13 @@ export default function Home() {
               {result?.confidence.meaning ||
                 'Scores stay hidden until a real specialist returns; SatQuery never invents a confidence percentage.'}
             </p>
+            {!result && !busy && phase !== 'failed' && (
+              <div className="brief-empty-guide" aria-label="Analysis output stages">
+                <div><span>01</span><strong>Validate</strong><small>File contract and source metadata</small></div>
+                <div><span>02</span><strong>Route</strong><small>Compatible specialist selection</small></div>
+                <div><span>03</span><strong>Report</strong><small>Answer, evidence and provenance</small></div>
+              </div>
+            )}
             {result && !uncalibrated && (
               <div className="confidence-track">
                 <span style={{ width: `${result.confidence.score * 100}%` }} />
@@ -1439,6 +1582,25 @@ export default function Home() {
                 <pre>{JSON.stringify(result.facts, null, 2)}</pre>
               </details>
             ) : null}
+            {result && Object.keys(result.provenance ?? {}).length > 0 && (
+              <section className="provenance-block">
+                <h3>
+                  <ShieldCheck /> Provenance
+                </h3>
+                <dl>
+                  {Object.entries(result.provenance).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{key.replaceAll('_', ' ')}</dt>
+                      <dd>
+                        {typeof value === 'string' || typeof value === 'number'
+                          ? String(value)
+                          : JSON.stringify(value)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
             {analysis?.status === 'succeeded' && (
               <div className="artifact-links">
                 <a
@@ -1460,7 +1622,6 @@ export default function Home() {
           </section>
 
           <section
-            hidden={outputView !== 'trace'}
             className="trace-card glass-panel"
             id="trace"
           >

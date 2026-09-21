@@ -7,8 +7,14 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.models.gateway import HttpSpecialistGateway, HybridSpecialistGateway
+from app.errors import ModelUnavailableError
+from app.models.gateway import (
+    FallbackPairSpecialistGateway,
+    HttpSpecialistGateway,
+    HybridSpecialistGateway,
+)
 from app.models.pair_tools import PAIR_TASKS
+from app.schemas import EvidenceItem, PlannedStep, SpecialistOutput, TaskType
 from app.storage import LocalAssetStore
 
 
@@ -131,3 +137,73 @@ async def test_hybrid_child_failure_does_not_claim_ready():
     pair.health.return_value = True
 
     assert await HybridSpecialistGateway(single, pair).health() is False
+
+
+def _pair_output(task: TaskType, version: str) -> SpecialistOutput:
+    return SpecialistOutput(
+        task=task,
+        text="Pair result",
+        facts=[],
+        evidence=[
+            EvidenceItem(
+                id="ev_a",
+                type="box",
+                label="candidate",
+                score=0.5,
+                coordinate_space="normalized",
+                geometry={"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2},
+                asset_id="ast_a",
+            )
+        ],
+        raw_score=0.5,
+        score_kind="evidence_quality",
+        model_version=version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pair_gateway_labels_reachable_learned_change_service():
+    learned = AsyncMock()
+    learned.infer.return_value = _pair_output(TaskType.CHANGE_VQA, "checkpoint@immutable-sha")
+    analytical = AsyncMock()
+    gateway = FallbackPairSpecialistGateway(learned, analytical)
+    step = PlannedStep(
+        step_id="step-1",
+        task=TaskType.CHANGE_VQA,
+        asset_ids=["ast_a", "ast_b"],
+        policy_reason="test",
+    )
+
+    output = await gateway.infer(step, [], "What changed?")
+
+    assert {item["name"]: item["value"] for item in output.facts}[
+        "pair_execution_method"
+    ] == "learned-cdvqa-v1"
+    assert output.evidence[0].geometry["method"] == "learned-cdvqa-v1"
+    analytical.infer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pair_gateway_falls_back_and_labels_analytical_method():
+    learned = AsyncMock()
+    learned.infer.side_effect = ModelUnavailableError("checkpoint offline")
+    analytical = AsyncMock()
+    analytical.infer.return_value = _pair_output(
+        TaskType.OPTICAL_SAR_FUSION, "satquery-optical-sar-proxy-tool-v2"
+    )
+    gateway = FallbackPairSpecialistGateway(learned, analytical)
+    step = PlannedStep(
+        step_id="step-1",
+        task=TaskType.OPTICAL_SAR_FUSION,
+        asset_ids=["ast_a", "ast_b"],
+        policy_reason="test",
+    )
+
+    output = await gateway.infer(step, [], "Fuse these scenes")
+
+    assert {item["name"]: item["value"] for item in output.facts}[
+        "pair_execution_method"
+    ] == "analytical-fusion-baseline"
+    assert output.evidence[0].geometry["method"] == "analytical-fusion-baseline"
+    assert any("checkpoint offline" in warning for warning in output.warnings)
+    analytical.infer.assert_awaited_once()

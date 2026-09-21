@@ -1,4 +1,4 @@
-# OPTIONAL: only after training/exporting v2 ChangeVQA or TerraMind artifacts.
+# OPTIONAL: only after training/exporting a v2 ChangeVQA or v3 TerraMind fusion artifact.
 # Attach each exported artifact folder as a private Kaggle input or copy it into /kaggle/working.
 # Never populate these paths with random/untrained weights. Empty values leave Qwen unchanged.
 PAIR_ARTIFACT_DIRS = {"change": "", "fusion": ""}

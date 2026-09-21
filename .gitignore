@@ -57,3 +57,10 @@ next-env.d.ts
 /work/
 /backend/data/
 /data/runtime/
+
+# New cloud training binaries stay local; commit metrics/provenance, not failed checkpoints.
+/upgrade/**/*.safetensors
+/upgrade/**/*.pt
+/upgrade/**/*.bin
+/upgrade/**/*.zip
+/upgrade/03_change_inference/artifacts/*predictions.jsonl

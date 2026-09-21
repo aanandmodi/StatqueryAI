@@ -181,7 +181,9 @@ sequenceDiagram
 - **Remote-Sensing Adapted VLM**: Qwen3-VL 4-bit domain adapter for VQA and captioning.
 - **Spatial Grounding Specialist**: Generates normalized bounding coordinates `[ymin, xmin, ymax, xmax]` for target features.
 - **Bi-Temporal Baseline**: Auditable registered-grid differencing and optional spectral tools. The CDVQA/SECOND learned expert exists as a training path but is not released until a compatible checkpoint passes held-out evaluation.
-- **Optical + SAR Baseline**: Auditable optical-context/backscatter proxy. The TerraMind path is release-gated and currently learns scene labels, not precision fusion masks.
+- **Optical + SAR Baseline**: Auditable optical-context/backscatter proxy. A pixel-supervised
+  TerraMind/Sen1Floods11 v3 training and serving path is implemented, but remains release-gated
+  until a pinned checkpoint passes held-out evaluation and real HTTP inference.
 - **Deterministic Spectral Tools** ([`backend/app/models/masks.py`](../backend/app/models/masks.py)): Sensor-qualified NDWI and NDVI; Sentinel-2-only NDBI/NBR/dNBR because SWIR is required. These are analytical indices, not calibrated semantic probabilities.
 - **Mask Extent Measurement** ([`backend/app/models/mask_comparison.py`](../backend/app/models/mask_comparison.py)): Performs pixel-accurate boolean operations (`left & ~right` for loss, `right & ~left` for gain) and multiplies by ground pixel resolution to yield metric area changes ($m^2$ / hectares).
 

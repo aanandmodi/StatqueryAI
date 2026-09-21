@@ -4,6 +4,7 @@ export default function Methods() {
   return (
     <main className="document-shell">
       <StudioNav active="/method" />
+      <div className="document-content">
       <header className="document-heading">
         <span className="eyebrow">04 / Methods & limits</span>
         <h1>Make the evidence inspectable.</h1>
@@ -180,6 +181,7 @@ export default function Methods() {
           </p>
           <Link href="/archive">Find historical satellite and weather context →</Link>
         </section>
+      </div>
       </div>
     </main>
   );

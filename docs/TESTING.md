@@ -1,13 +1,14 @@
 # Verification and release gates
 
-## Current verified gates — 2026-09-08
+## Current verified gates — 2026-09-09
 
 | Gate | Result |
 |---|---|
-| Backend + ML | 275 tests passed |
-| Frontend proxy | 10 Node tests passed |
-| Static checks | Ruff, frontend lint and TypeScript passed |
+| Backend + ML | 284 tests passed |
+| Frontend proxy | 20 Node tests passed |
+| Static checks | Targeted Python Ruff, frontend lint and TypeScript passed |
 | Production bundle | Vinext build passed for all local routes |
+| Paired notebook contracts | Change v2 and pixel-fusion v3 notebooks synchronized and compiled |
 | Live single image | `anl_dacb7462e8ec4814bc06919da9169702`; Qwen/SAM, 1 mask, 7 polygons |
 | Live temporal pair | `anl_c73d35849c254c0a8103ef596f50c1b2`; 3 masks, 134 polygons; analytical comparison and metric-area abstention |
 | Live optical/SAR pair | `anl_096e54f5aa65489a9cf5caa0af133441`; analytical proxy, 1 mask, 64 polygons |
@@ -28,8 +29,9 @@ Live integration proves transport and artifact contracts, not semantic accuracy 
   extent measurement, six candidate masks. No metric area was inferred from unreferenced sources.
 - This case used **deterministic fallback**, not a learned planner: remote `/v1/plan` returned 404.
   The live update cell must be run in the existing Kaggle notebook before the learned route is tested.
-- New trained ChangeVQA/TerraMind GPU inference and held-out accuracy were **not** tested. No
-  checkpoints were trained on this laptop. AST equivalence, mocked HTTP and synthetic mask tests
+- New trained ChangeVQA/TerraMind GPU inference and held-out accuracy were **not** tested. The
+  TerraMind path now has pixel supervision and a strict v3 runtime, but no passing checkpoint was
+  trained on this laptop. AST equivalence, mocked HTTP and synthetic mask tests
   are software checks, not scientific validation. No new browser visual QA was performed.
 - Final local website, case route and readiness returned HTTP 200. Website/backend remain local.
 

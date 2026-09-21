@@ -25,6 +25,7 @@ TARGET_CLASSES = {
     "burn-scar",
     "burned",
     "drought",
+    "moisture",
 }
 
 # Display/find requests are spatial when they name a supported feature. "Show my report"
@@ -33,7 +34,7 @@ DISPLAY_FEATURE_PATTERN = re.compile(
     r"\b(?:show|display|draw|find|detect|identify|map)\b[^.!?\n]{0,160}"
     r"\b(?:water(?:\s*bodies?)?|lakes?|rivers?|ponds?|reservoirs?|built-up|urban|"
     r"vegetation|forests?|cropland|agriculture|roads?|buildings?|flood|bare\s+soil|"
-    r"burn(?:ed|t)?(?:\s+scar)?|drought)\b",
+    r"burn(?:ed|t)?(?:\s+scar)?|drought|moisture)\b",
     re.I,
 )
 

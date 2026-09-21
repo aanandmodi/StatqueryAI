@@ -1,0 +1,94 @@
+{
+  "base": {
+    "vqa_exact_match": {
+      "value": 0.0,
+      "scene_bootstrap_95_ci": [
+        0.0,
+        0.0
+      ],
+      "examples": 100,
+      "scenes": 95
+    },
+    "grounding_mean_iou": {
+      "value": 0.021699609802,
+      "scene_bootstrap_95_ci": [
+        0.0,
+        0.059999219604
+      ],
+      "examples": 50,
+      "scenes": 50
+    },
+    "grounding_accuracy_iou_0_5": {
+      "value": 0.02,
+      "scene_bootstrap_95_ci": [
+        0.0,
+        0.06
+      ],
+      "examples": 50,
+      "scenes": 50
+    },
+    "caption_token_f1": {
+      "value": 0.302563196948,
+      "scene_bootstrap_95_ci": [
+        0.28854881513725,
+        0.31678418037139994
+      ],
+      "examples": 50,
+      "scenes": 50
+    }
+  },
+  "lora": {
+    "vqa_exact_match": {
+      "value": 0.61,
+      "scene_bootstrap_95_ci": [
+        0.52,
+        0.7
+      ],
+      "examples": 100,
+      "scenes": 95
+    },
+    "grounding_mean_iou": {
+      "value": 0.422671083418,
+      "scene_bootstrap_95_ci": [
+        0.33794458221315005,
+        0.5107430259857499
+      ],
+      "examples": 50,
+      "scenes": 50
+    },
+    "grounding_accuracy_iou_0_5": {
+      "value": 0.42,
+      "scene_bootstrap_95_ci": [
+        0.28,
+        0.56
+      ],
+      "examples": 50,
+      "scenes": 50
+    },
+    "caption_token_f1": {
+      "value": 0.40144548296,
+      "scene_bootstrap_95_ci": [
+        0.38082661475874996,
+        0.4215542288868999
+      ],
+      "examples": 50,
+      "scenes": 50
+    }
+  },
+  "calibration_test": {
+    "base": {
+      "temperature_from_validation": 2.8772088153466995,
+      "examples": 100,
+      "raw_ece": 0.6418343338549999,
+      "frozen_temperature_test_ece": 0.5516066665355395
+    },
+    "lora": {
+      "temperature_from_validation": 1.4328580512512024,
+      "examples": 100,
+      "raw_ece": 0.15072979155000005,
+      "frozen_temperature_test_ece": 0.1304082861463805
+    }
+  },
+  "automatic_probability_release": false,
+  "scope": "Qwen binary/MCQ correctness diagnostics; excludes mask confidence and ISRO transfer."
+}

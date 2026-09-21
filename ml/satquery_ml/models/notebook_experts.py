@@ -32,27 +32,44 @@ class ChangeExpert(torch.nn.Module):
 
 
 class FusionExpert(torch.nn.Module):
-    def __init__(self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224):
+    """TerraMind token head trained with real per-pixel flood labels."""
+
+    def __init__(
+        self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224
+    ):
         super().__init__()
         self.backbone = backbone
         self.norm = torch.nn.LayerNorm(embedding_dim)
-        self.classifier = torch.nn.Linear(embedding_dim, num_classes)
+        self.segmenter = torch.nn.Linear(embedding_dim, num_classes)
         self.num_classes, self.image_size = num_classes, image_size
 
     def forward(self, *, s2=None, s1=None):
         inputs = {}
         if s2 is not None:
-            inputs["S2L2A"] = s2
+            inputs["S2L1C"] = s2
         if s1 is not None:
             inputs["S1GRD"] = s1
         if not inputs:
             raise ValueError("At least one modality is required")
         tokens = self.backbone(inputs)[-1]
-        patch_logits = self.classifier(self.norm(tokens))
-        class_logits = patch_logits.mean(1)
         side = math.isqrt(tokens.shape[1])
+        if (
+            side * side != tokens.shape[1]
+            and math.isqrt(tokens.shape[1] - 1) ** 2 == tokens.shape[1] - 1
+        ):
+            tokens, side = tokens[:, 1:], math.isqrt(tokens.shape[1] - 1)
         if side * side != tokens.shape[1]:
-            raise ValueError("Backbone tokens cannot be reshaped to a square evidence grid")
-        evidence = patch_logits.transpose(1, 2).reshape(tokens.shape[0], self.num_classes, side, side)
-        evidence = F.interpolate(evidence, (self.image_size, self.image_size), mode="bilinear", align_corners=False)
-        return class_logits, evidence
+            raise ValueError(
+                "Backbone tokens cannot be reshaped to a square segmentation grid"
+            )
+        logits = (
+            self.segmenter(self.norm(tokens))
+            .transpose(1, 2)
+            .reshape(tokens.shape[0], self.num_classes, side, side)
+        )
+        return F.interpolate(
+            logits,
+            (self.image_size, self.image_size),
+            mode="bilinear",
+            align_corners=False,
+        )

@@ -1,0 +1,259 @@
+{
+  "artifact_version": "satquery-pair-v3",
+  "architecture": "terramind_s1_s2_pixel_flood_segmentation",
+  "mask_supervision": "Sen1Floods11 v1.1 LabelHand pixels; -1 ignored",
+  "calibrated": false,
+  "embedding_dim": 192,
+  "backbone": "terramind_v1_tiny",
+  "modalities": [
+    "S2L1C",
+    "S1GRD"
+  ],
+  "classes": [
+    "other",
+    "flood_water"
+  ],
+  "s2_bands": [
+    "B01",
+    "B02",
+    "B03",
+    "B04",
+    "B05",
+    "B06",
+    "B07",
+    "B08",
+    "B8A",
+    "B09",
+    "B10",
+    "B11",
+    "B12"
+  ],
+  "s1_bands": [
+    "VV",
+    "VH"
+  ],
+  "normalization": {
+    "s2_mean": [
+      2357.089111328125,
+      2137.385009765625,
+      2018.7879638671875,
+      2082.986083984375,
+      2295.65087890625,
+      2854.537109375,
+      3122.84912109375,
+      3040.56005859375,
+      3306.48095703125,
+      1473.8470458984375,
+      506.07000732421875,
+      2472.824951171875,
+      1838.928955078125
+    ],
+    "s2_std": [
+      1624.6829833984375,
+      1675.8060302734375,
+      1557.7080078125,
+      1833.7020263671875,
+      1823.738037109375,
+      1733.97705078125,
+      1732.1309814453125,
+      1679.7320556640625,
+      1727.260009765625,
+      1024.68701171875,
+      442.1650085449219,
+      1331.4110107421875,
+      1160.4189453125
+    ],
+    "s1_mean": [
+      -12.598999977111816,
+      -20.292999267578125
+    ],
+    "s1_std": [
+      5.195000171661377,
+      5.889999866485596
+    ]
+  },
+  "config": {
+    "dataset_root": "/kaggle/working/sen1floods11-v1.1",
+    "seed": 42,
+    "image_size": 224,
+    "batch_size": 4,
+    "epochs": 8,
+    "smoke_test": false,
+    "smoke_train_chips": 32,
+    "smoke_validation_chips": 16,
+    "head_learning_rate": 0.0002,
+    "backbone_learning_rate": 2e-05,
+    "weight_decay": 0.01,
+    "modality_drop_rate": 0.1,
+    "workers": 2,
+    "resume": true,
+    "run_test_once": true,
+    "release_minimum_flood_iou": 0.5,
+    "repo_id": "aanandmodi/satquery-terramind-sen1floods11-segmentation",
+    "push_to_hub": false
+  },
+  "validation": {
+    "fused": {
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    "s2": {
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    "s1": {
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    }
+  },
+  "test": {
+    "fused": {
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.43851862906135614,
+      "mean_absolute_flood_fraction_error": 0.12246443534294599,
+      "valid_pixels": 3913348,
+      "chips": 90
+    },
+    "s2": {
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.43851862906135614,
+      "mean_absolute_flood_fraction_error": 0.12246443534294599,
+      "valid_pixels": 3913348,
+      "chips": 90
+    },
+    "s1": {
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.43851862906135614,
+      "mean_absolute_flood_fraction_error": 0.12246443534294599,
+      "valid_pixels": 3913348,
+      "chips": 90
+    }
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 2,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 3,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 4,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 5,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 6,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 7,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    },
+    {
+      "epoch": 8,
+      "train_loss": NaN,
+      "flood_iou": 0.0,
+      "flood_dice": 0.0,
+      "flood_precision": 0.0,
+      "flood_recall": 0.0,
+      "mean_iou": 0.4449073871292715,
+      "mean_absolute_flood_fraction_error": 0.11042908953113804,
+      "valid_pixels": 3881210,
+      "chips": 89
+    }
+  ],
+  "score_semantics": "Pixel softmax is uncalibrated; IoU/Dice use hand labels.",
+  "domain_gap": "Sentinel training does not establish Cartosat/RISAT or India-domain accuracy."
+}

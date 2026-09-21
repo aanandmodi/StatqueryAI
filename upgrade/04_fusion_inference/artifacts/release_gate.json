@@ -1,0 +1,13 @@
+{
+  "pixel_supervision": true,
+  "official_disjoint_splits": true,
+  "raw_validation_predictions": true,
+  "weights": true,
+  "hash_manifest": true,
+  "release_threshold_declared": true,
+  "fused_not_worse_than_single_modality": true,
+  "validation_gate_passed": false,
+  "untouched_test_run_completed": true,
+  "test_gate_passed": false,
+  "paid_endpoint_created": false
+}

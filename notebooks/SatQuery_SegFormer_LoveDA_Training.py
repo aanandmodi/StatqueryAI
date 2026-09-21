@@ -35,6 +35,13 @@
 # %%
 import subprocess
 import sys
+import os
+
+# Set before importing torch: use one GPU, not notebook DataParallel on two T4s.
+if "torch" in sys.modules and sys.modules["torch"].cuda.is_initialized():
+    raise RuntimeError("Start a fresh GPU session before running this memory-safe notebook.")
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 PACKAGES = [
     "transformers==4.57.1",
@@ -65,15 +72,15 @@ class Config:
     output_repo: str = "aanandmodi/satquery-segformer-loveda"
     train_fraction: float = 0.70
     seed: int = 42
-    crop_size: int = 512
+    crop_size: int = 384
     epochs: int = 12
-    train_batch_size: int = 2
-    eval_batch_size: int = 2
-    gradient_accumulation_steps: int = 4
+    train_batch_size: int = 1
+    eval_batch_size: int = 1
+    gradient_accumulation_steps: int = 8
     learning_rate: float = 6e-5
     weight_decay: float = 0.01
     dice_weight: float = 0.5
-    num_workers: int = 2
+    num_workers: int = 0
     push_to_hub: bool = False
     make_repo_private: bool = True
 
@@ -324,7 +331,8 @@ print({"train": len(train_dataset), "validation": len(validation_dataset), "labe
 # %%
 class_counts = np.zeros(len(LABELS), dtype=np.int64)
 for position, index in enumerate(train_indexes):
-    mask = train_source[index]["mask"].numpy()
+    with Image.open(train_source.files[index]["mask"]) as source_mask:
+        mask = np.asarray(source_mask)
     for publisher_id in range(1, 8):
         class_counts[publisher_id - 1] += int((mask == publisher_id).sum())
     if (position + 1) % 500 == 0:
@@ -354,6 +362,12 @@ weight_tensor = torch.tensor(class_weights, dtype=torch.float32)
 
 
 class DiceCETrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # This custom mean loss does not use num_items_in_batch; Trainer must divide
+        # by gradient_accumulation_steps rather than treating it as pre-normalized.
+        self.model_accepts_loss_kwargs = False
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
         inputs.pop("source_index", None)
@@ -361,18 +375,24 @@ class DiceCETrainer(Trainer):
         logits = F.interpolate(
             outputs.logits, size=labels.shape[-2:], mode="bilinear", align_corners=False
         )
+        valid = labels != 255
+        if not valid.any():
+            loss = logits.sum() * 0.0
+            return (loss, outputs) if return_outputs else loss
         ce = F.cross_entropy(
             logits, labels, weight=weight_tensor.to(logits.device), ignore_index=255
         )
-        valid = labels != 255
-        safe_labels = labels.masked_fill(~valid, 0)
-        one_hot = F.one_hot(safe_labels, num_classes=len(LABELS)).permute(0, 3, 1, 2)
-        one_hot = one_hot.to(logits.dtype) * valid.unsqueeze(1)
-        probabilities = logits.softmax(dim=1) * valid.unsqueeze(1)
-        intersection = (probabilities * one_hot).sum(dim=(0, 2, 3))
-        denominator = probabilities.sum(dim=(0, 2, 3)) + one_hot.sum(dim=(0, 2, 3))
-        present = one_hot.sum(dim=(0, 2, 3)) > 0
-        dice_loss = 1 - ((2 * intersection[present] + 1) / (denominator[present] + 1)).mean()
+        # No full int64 one-hot mask; float32 reductions avoid fp16 overflow.
+        probabilities = logits.float().softmax(dim=1)
+        dice_terms = []
+        for class_id in range(len(LABELS)):
+            expected = labels == class_id
+            if expected.any():
+                probability = probabilities[:, class_id] * valid
+                intersection = (probability * expected).sum()
+                denominator = probability.sum() + expected.sum()
+                dice_terms.append((2 * intersection + 1) / (denominator + 1))
+        dice_loss = 1 - torch.stack(dice_terms).mean()
         loss = ce + CFG.dice_weight * dice_loss
         return (loss, outputs) if return_outputs else loss
 
@@ -381,6 +401,9 @@ print({"parameters": sum(parameter.numel() for parameter in model.parameters())}
 
 # %% [markdown]
 # ## 8. Real validation metrics
+#
+# Streaming confusion matrix: never retain full-validation masks/labels. Moving accumulated
+# masks to CPU with eval_accumulation_steps alone still exhausts system RAM.
 
 # %%
 from transformers import EvalPrediction
@@ -390,20 +413,22 @@ def preprocess_logits(logits, labels):
     if isinstance(logits, tuple):
         logits = logits[0]
     logits = F.interpolate(logits, size=labels.shape[-2:], mode="bilinear", align_corners=False)
-    return logits.argmax(dim=1)
+    return logits.argmax(dim=1).to(torch.uint8)
 
 
-def segmentation_metrics(evaluation: EvalPrediction) -> dict[str, float]:
-    predictions = np.asarray(evaluation.predictions)
-    references = np.asarray(evaluation.label_ids)
+def update_confusion(confusion, predictions, references):
+    valid = (references >= 0) & (references < len(LABELS))
+    encoded = len(LABELS) * references[valid].astype(np.int64) + predictions[valid]
+    confusion += np.bincount(encoded, minlength=len(LABELS) ** 2).reshape(confusion.shape)
+
+
+def metrics_from_confusion(confusion) -> dict[str, float]:
     metrics: dict[str, float] = {}
     ious, dices = [], []
     for class_id, label in ID2LABEL.items():
-        predicted = predictions == class_id
-        expected = references == class_id
-        intersection = np.logical_and(predicted, expected).sum()
-        union = np.logical_or(predicted, expected).sum()
-        denominator = predicted.sum() + expected.sum()
+        intersection = confusion[class_id, class_id]
+        denominator = confusion[:, class_id].sum() + confusion[class_id, :].sum()
+        union = denominator - intersection
         iou = float(intersection / union) if union else float("nan")
         dice = float(2 * intersection / denominator) if denominator else float("nan")
         metrics[f"iou_{label}"] = iou
@@ -412,11 +437,26 @@ def segmentation_metrics(evaluation: EvalPrediction) -> dict[str, float]:
             ious.append(iou)
         if np.isfinite(dice):
             dices.append(dice)
-    valid = references != 255
-    metrics["mean_iou"] = float(np.mean(ious))
-    metrics["mean_dice"] = float(np.mean(dices))
-    metrics["pixel_accuracy"] = float((predictions[valid] == references[valid]).mean())
+    metrics["mean_iou"] = float(np.mean(ious)) if ious else 0.0
+    metrics["mean_dice"] = float(np.mean(dices)) if dices else 0.0
+    metrics["pixel_accuracy"] = float(np.trace(confusion) / max(1, confusion.sum()))
     return metrics
+
+
+class StreamingSegmentationMetrics:
+    def __init__(self):
+        self.confusion = np.zeros((len(LABELS), len(LABELS)), dtype=np.int64)
+
+    def __call__(self, evaluation: EvalPrediction, compute_result: bool = False):
+        def cpu(value):
+            return value.detach().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
+
+        update_confusion(self.confusion, cpu(evaluation.predictions), cpu(evaluation.label_ids))
+        if not compute_result:
+            return {}
+        result = metrics_from_confusion(self.confusion)
+        self.confusion.fill(0)
+        return result
 
 # %% [markdown]
 # ## 9. Train with checkpoint/resume
@@ -432,7 +472,8 @@ training_args = TrainingArguments(
     per_device_train_batch_size=CFG.train_batch_size,
     per_device_eval_batch_size=CFG.eval_batch_size,
     gradient_accumulation_steps=CFG.gradient_accumulation_steps,
-    fp16=True,
+    bf16=torch.cuda.is_bf16_supported(),
+    fp16=not torch.cuda.is_bf16_supported(),
     eval_strategy="epoch",
     save_strategy="epoch",
     logging_steps=25,
@@ -441,6 +482,9 @@ training_args = TrainingArguments(
     metric_for_best_model="mean_iou",
     greater_is_better=True,
     dataloader_num_workers=CFG.num_workers,
+    dataloader_pin_memory=False,
+    batch_eval_metrics=True,
+    save_safetensors=True,
     eval_accumulation_steps=1,
     remove_unused_columns=False,
     report_to="none",
@@ -452,12 +496,24 @@ trainer = DiceCETrainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
-    compute_metrics=segmentation_metrics,
+    compute_metrics=StreamingSegmentationMetrics(),
     preprocess_logits_for_metrics=preprocess_logits,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
 )
 checkpoint_root = Path(training_args.output_dir)
+checkpoint_root.mkdir(parents=True, exist_ok=True)
+run_config = {"config": asdict(CFG), "selection_sha256": selection_sha256, "profile": "streaming-v2"}
+run_config_path = checkpoint_root / "resume_config.json"
+if any(checkpoint_root.glob("checkpoint-*")):
+    if not run_config_path.exists() or json.loads(run_config_path.read_text()) != run_config:
+        raise RuntimeError("Existing checkpoints belong to another configuration. Preserve them and start a fresh output/session; do not silently resume.")
+run_config_path.write_text(json.dumps(run_config, indent=2), encoding="utf-8")
 checkpoints = sorted(checkpoint_root.glob("checkpoint-*"), key=lambda path: int(path.name.split("-")[-1]))
+# Catch memory/configuration errors before spending an epoch. This small check does not
+# select a checkpoint or replace the full official validation below.
+from torch.utils.data import Subset
+print("Preflight: streaming evaluation on two validation scenes")
+trainer.evaluate(eval_dataset=Subset(validation_dataset, range(min(2, len(validation_dataset)))), metric_key_prefix="preflight")
+trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=3))
 trainer.train(resume_from_checkpoint=str(checkpoints[-1]) if checkpoints else None)
 final_metrics = trainer.evaluate()
 print(json.dumps(final_metrics, indent=2, sort_keys=True))
@@ -492,7 +548,7 @@ trainer.model.eval()
 def scene_scores(prediction: np.ndarray, reference: np.ndarray) -> dict[str, float | None]:
     scores = {}
     for class_id, label in ID2LABEL.items():
-        predicted = prediction == class_id
+        predicted = (prediction == class_id) & (reference != 255)
         expected = reference == class_id
         intersection = int(np.logical_and(predicted, expected).sum())
         union = int(np.logical_or(predicted, expected).sum())
@@ -506,15 +562,16 @@ for position in tqdm(range(len(validation_dataset)), desc="Validation evidence")
     item = validation_dataset[position]
     pixel_values = item["pixel_values"].unsqueeze(0).to("cuda")
     reference = item["labels"].numpy()
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16 if training_args.bf16 else torch.float16):
         logits = trainer.model(pixel_values=pixel_values).logits
         logits = F.interpolate(
             logits, size=reference.shape, mode="bilinear", align_corners=False
         )[0]
-        probabilities = logits.softmax(dim=0)
+        probabilities = logits.float().softmax(dim=0)
         confidence, prediction_tensor = probabilities.max(dim=0)
     prediction = prediction_tensor.cpu().numpy()
     confidence = confidence.float().cpu().numpy()
+    del logits, probabilities, prediction_tensor, pixel_values
     valid = reference != 255
     bins = np.minimum((confidence[valid] * 15).astype(int), 14)
     correct = prediction[valid] == reference[valid]
@@ -597,7 +654,7 @@ release_checks = {
     },
 }
 release_candidate = all(release_checks.values())
-trainer.save_model(OUTPUT_DIR, safe_serialization=True)
+trainer.save_model(str(OUTPUT_DIR))
 processor.save_pretrained(OUTPUT_DIR)
 
 manifest = {
@@ -627,7 +684,7 @@ manifest = {
 
 hashes = {}
 for path in sorted(OUTPUT_DIR.iterdir()):
-    if path.is_file():
+    if path.is_file() and path.name != "sha256_manifest.json":
         hashes[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
 (OUTPUT_DIR / "sha256_manifest.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
 (EVAL_DIR / "validation_metrics.json").write_text(
@@ -639,16 +696,20 @@ print(json.dumps({"release_candidate": release_candidate, "checks": release_chec
 # ## 12. Fresh local reload smoke test
 
 # %%
+import gc
 del trainer, model
+gc.collect()
 torch.cuda.empty_cache()
 reloaded_processor = SegformerImageProcessor.from_pretrained(OUTPUT_DIR)
 reloaded = SegformerForSemanticSegmentation.from_pretrained(
     OUTPUT_DIR, use_safetensors=True, trust_remote_code=False
 ).to("cuda").eval()
 smoke = validation_source[0]
-smoke_image = smoke["image"].permute(1, 2, 0).byte().numpy()
+smoke_image = np.asarray(Image.fromarray(smoke["image"].permute(1, 2, 0).byte().numpy()).resize(
+    (CFG.crop_size, CFG.crop_size), Image.Resampling.BILINEAR
+))
 smoke_batch = reloaded_processor(images=smoke_image, return_tensors="pt").to("cuda")
-with torch.inference_mode():
+with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16 if training_args.bf16 else torch.float16):
     smoke_logits = reloaded(**smoke_batch).logits
 assert smoke_logits.shape[1] == len(LABELS)
 print({"PASS": "fresh safetensors reload", "logits": list(smoke_logits.shape)})

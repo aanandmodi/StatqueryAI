@@ -16,8 +16,9 @@ from transformers import (
 QUALITY_VERSION = "satquery-quality-v4"
 SAM_REPO = "facebook/sam2.1-hiera-tiny"
 SAM_REVISION = "de431c4043854a71d8101e17995dfe596bf101a5"
-SEGMENTATION_REPO = "wu-pr-gw/segformer-b2-finetuned-with-LoveDA"
-SEGMENTATION_REVISION = "5c74556c08bebb5f45f50b6f78f61a62c5d220c7"
+SEGMENTATION_REPO = globals().get("SATQUERY_SEGMENTATION_PATH") or "wu-pr-gw/segformer-b2-finetuned-with-LoveDA"
+SEGMENTATION_REVISION = globals().get("SATQUERY_SEGMENTATION_SHA") or "5c74556c08bebb5f45f50b6f78f61a62c5d220c7"
+SEGMENTATION_LOAD_REVISION = None if globals().get("SATQUERY_SEGMENTATION_PATH") else SEGMENTATION_REVISION
 QUALITY_IMAGE_EDGE = 1024
 QUALITY_MAX_TOKENS = 768
 QUALITY_MAX_TARGETS = 3
@@ -48,17 +49,17 @@ if globals().get("quality_sam_revision") != SAM_REVISION:
 if globals().get("quality_segmentation_revision") != SEGMENTATION_REVISION:
     quality_segmentation_processor = AutoImageProcessor.from_pretrained(
         SEGMENTATION_REPO,
-        revision=SEGMENTATION_REVISION,
+        revision=SEGMENTATION_LOAD_REVISION,
         trust_remote_code=False,
     )
     quality_segmentation = SegformerForSemanticSegmentation.from_pretrained(
         SEGMENTATION_REPO,
-        revision=SEGMENTATION_REVISION,
+        revision=SEGMENTATION_LOAD_REVISION,
         trust_remote_code=False,
         # This pinned transfer checkpoint publishes pytorch_model.bin, not safetensors.
         # The exact immutable revision is mandatory; our own trained replacement exports
         # safetensors and should supersede this experimental baseline after evaluation.
-        use_safetensors=False,
+        use_safetensors=bool(globals().get("SATQUERY_SEGMENTATION_PATH")),
         torch_dtype=torch.float16,
     ).to("cuda:0").eval()
     quality_segmentation_revision = SEGMENTATION_REVISION

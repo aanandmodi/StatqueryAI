@@ -3,6 +3,14 @@
 This runbook produces auditable results on free Kaggle GPU and scores them locally without using
 GPU quota. It does not contain target numbers and does not certify change/fusion specialists.
 
+## Current evidence status
+
+A 200-row validation aggregate from the pinned base and LoRA was recorded on 2026-09-08 in
+[`evaluation/validation-200-aggregate.json`](evaluation/validation-200-aggregate.json). LoRA
+improved every reported aggregate. The raw per-example JSONL is still missing from the repository,
+so scene-bootstrap intervals, error slices and probability calibration remain blocked. The runtime
+must keep reporting these scores as uncalibrated until an untouched test run passes.
+
 ## Evidence flow
 
 ```mermaid

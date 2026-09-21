@@ -1,0 +1,21 @@
+{
+  "adapter_revision": "ed12e59e0def9468bdf4a226789fc1b77c7900e7",
+  "base_revision": "89644892e4d85e24eaac8bacfd4f463576704203",
+  "dataset_revision": "72d865f2146f0a85b720f7f3ca1cdbaeafc3d316",
+  "image_dataset_revision": "7a83ae701109ec232d40665b9677fc46310a1a8b",
+  "split": "test",
+  "rows": 200,
+  "base": {
+    "vqa_exact_match": 0.0,
+    "grounding_mean_iou": 0.021699609802583283,
+    "grounding_accuracy_iou_0_5": 0.02,
+    "caption_token_f1": 0.3025631969442361
+  },
+  "lora": {
+    "vqa_exact_match": 0.61,
+    "grounding_mean_iou": 0.42267108341660936,
+    "grounding_accuracy_iou_0_5": 0.42,
+    "caption_token_f1": 0.4014454829562167
+  },
+  "confidence_semantics": "sequence_confidence is an observed generation statistic, not a correctness probability. Use scripts/score-real-evaluation.py for held-out temperature scaling and bootstrap CIs."
+}

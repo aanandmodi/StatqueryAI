@@ -198,6 +198,17 @@ def scale_band(band: np.ndarray) -> np.ndarray:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 # BEGIN SENSOR PROFILE RUNTIME
 """Product metadata recognition. No filename, resolution or band-count sensor guesses.
 
@@ -343,9 +354,7 @@ def sentinel_fusion_indexes(optical, sar):
     """TerraMind's training channels are not interchangeable with RISAT/Cartosat."""
     s2, s1 = sensor_profile(optical), sensor_profile(sar)
     if s2["platform"] != "sentinel-2" or s1["platform"] != "sentinel-1":
-        raise ValueError(
-            "Fusion requires Sentinel-2 and Sentinel-1; ISRO transfer is unvalidated"
-        )
+        raise ValueError("Fusion requires Sentinel-2 and Sentinel-1; ISRO transfer is unvalidated")
     order = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
     descriptions = [str(item or "").upper().strip() for item in optical.descriptions]
     if any(descriptions.count(name) != 1 for name in order):
@@ -357,6 +366,48 @@ def sentinel_fusion_indexes(optical, sar):
         raise ValueError("Calibrated sigma0 in dB must be declared; raw amplitude is unsupported")
     if s2["representation"].lower() != "surface_reflectance_10000":
         raise ValueError("S2 L2A reflectance scaled by 10000 must be declared")
+    return [descriptions.index(name) + 1 for name in order], [
+        pols.index(pol) + 1 for pol in ["VV", "VH"]
+    ]
+
+
+def sen1floods11_fusion_indexes(optical, sar):
+    """Validate the exact S2 L1C/S1 GRD contract used by the pixel fusion expert."""
+    s2, s1 = sensor_profile(optical), sensor_profile(sar)
+    if s2["platform"] != "sentinel-2" or s1["platform"] != "sentinel-1":
+        raise ValueError(
+            "Sen1Floods11 fusion requires Sentinel-2 and Sentinel-1; ISRO transfer is unvalidated"
+        )
+    order = [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12",
+    ]
+    descriptions = [str(item or "").upper().strip() for item in optical.descriptions]
+    if any(descriptions.count(name) != 1 for name in order):
+        raise ValueError(
+            "Explicit ordered Sentinel-2 L1C band names B01-B12 including B10 required"
+        )
+    pols = [band["polarization"] for band in s1["bands"]]
+    if any(pols.count(pol) != 1 for pol in ["VV", "VH"]):
+        raise ValueError("This expert requires Sentinel-1 VV/VH; other channels cannot substitute")
+    if s1["representation"].lower() not in {"sigma0_db", "sigma0db"}:
+        raise ValueError("Calibrated sigma0 in dB must be declared; raw amplitude is unsupported")
+    if s2["representation"].lower() not in {
+        "toa_reflectance_10000",
+        "top_of_atmosphere_reflectance_10000",
+    }:
+        raise ValueError("S2 L1C top-of-atmosphere reflectance scaled by 10000 must be declared")
     return [descriptions.index(name) + 1 for name in order], [
         pols.index(pol) + 1 for pol in ["VV", "VH"]
     ]
@@ -721,8 +772,9 @@ from transformers import (
 QUALITY_VERSION = "satquery-quality-v4"
 SAM_REPO = "facebook/sam2.1-hiera-tiny"
 SAM_REVISION = "de431c4043854a71d8101e17995dfe596bf101a5"
-SEGMENTATION_REPO = "wu-pr-gw/segformer-b2-finetuned-with-LoveDA"
-SEGMENTATION_REVISION = "5c74556c08bebb5f45f50b6f78f61a62c5d220c7"
+SEGMENTATION_REPO = globals().get("SATQUERY_SEGMENTATION_PATH") or "wu-pr-gw/segformer-b2-finetuned-with-LoveDA"
+SEGMENTATION_REVISION = globals().get("SATQUERY_SEGMENTATION_SHA") or "5c74556c08bebb5f45f50b6f78f61a62c5d220c7"
+SEGMENTATION_LOAD_REVISION = None if globals().get("SATQUERY_SEGMENTATION_PATH") else SEGMENTATION_REVISION
 QUALITY_IMAGE_EDGE = 1024
 QUALITY_MAX_TOKENS = 768
 QUALITY_MAX_TARGETS = 3
@@ -753,17 +805,17 @@ if globals().get("quality_sam_revision") != SAM_REVISION:
 if globals().get("quality_segmentation_revision") != SEGMENTATION_REVISION:
     quality_segmentation_processor = AutoImageProcessor.from_pretrained(
         SEGMENTATION_REPO,
-        revision=SEGMENTATION_REVISION,
+        revision=SEGMENTATION_LOAD_REVISION,
         trust_remote_code=False,
     )
     quality_segmentation = SegformerForSemanticSegmentation.from_pretrained(
         SEGMENTATION_REPO,
-        revision=SEGMENTATION_REVISION,
+        revision=SEGMENTATION_LOAD_REVISION,
         trust_remote_code=False,
         # This pinned transfer checkpoint publishes pytorch_model.bin, not safetensors.
         # The exact immutable revision is mandatory; our own trained replacement exports
         # safetensors and should supersede this experimental baseline after evaluation.
-        use_safetensors=False,
+        use_safetensors=bool(globals().get("SATQUERY_SEGMENTATION_PATH")),
         torch_dtype=torch.float16,
     ).to("cuda:0").eval()
     quality_segmentation_revision = SEGMENTATION_REVISION

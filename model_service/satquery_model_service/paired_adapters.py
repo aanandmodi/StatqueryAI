@@ -1,4 +1,4 @@
-"""Strict runtime for the v2 cloud-notebook artifacts. No random-weight fallback."""
+"""Strict runtime for v2 change and v3 fusion artifacts. No random-weight fallback."""
 
 from __future__ import annotations
 
@@ -29,11 +29,12 @@ def verified_config(root):
         if manifest.get(name) != sha256(root / name):
             raise ValueError(f"Artifact integrity check failed: {name}")
     config = json.loads((root / "config.json").read_text(encoding="utf-8"))
-    if config.get("artifact_version") != "satquery-pair-v2":
+    artifact_version = config.get("artifact_version")
+    if artifact_version not in {"satquery-pair-v2", "satquery-pair-v3"}:
         raise ValueError(
-            "Use the corrected v2 training notebook export; legacy architectures are incompatible"
+            "Use a corrected v2/v3 training notebook export; legacy architectures are incompatible"
         )
-    return config, f"paired-v2:sha256:{sha256(root / 'model.safetensors')}"
+    return config, f"{artifact_version}:sha256:{sha256(root / 'model.safetensors')}"
 
 
 def validate_pair(paths):
@@ -224,8 +225,16 @@ class FusionAdapter:
 
         root = Path(settings.artifact_dir or "")
         config, self.version = verified_config(root)
-        if config.get("mask_supervision") != "none; scene labels only":
-            raise ValueError("Unknown fusion artifact supervision contract")
+        if (
+            config.get("artifact_version") != "satquery-pair-v3"
+            or config.get("architecture") != "terramind_s1_s2_pixel_flood_segmentation"
+            or not str(config.get("mask_supervision", "")).startswith(
+                "Sen1Floods11 v1.1 LabelHand"
+            )
+        ):
+            raise ValueError(
+                "Fusion requires the pixel-supervised Sen1Floods11 v3 artifact"
+            )
         self.labels, self.normalization = config["classes"], config["normalization"]
         self.size = int(config["config"]["image_size"])
         self.device = torch.device(
@@ -234,7 +243,7 @@ class FusionAdapter:
         backbone = BACKBONE_REGISTRY.build(
             config["backbone"],
             pretrained=False,
-            modalities=["S2L2A", "S1GRD"],
+            modalities=config["modalities"],
             merge_method="mean",
         )
         self.model = FusionExpert(
@@ -247,7 +256,8 @@ class FusionAdapter:
         import rasterio
         import torch
         from torch.nn import functional as F
-        from satquery_ml.sensors import sentinel_fusion_indexes
+        from PIL import Image
+        from satquery_ml.sensors import sen1floods11_fusion_indexes
 
         if payload.step.task != "optical_sar_fusion" or len(paths) != 2:
             raise ValueError("Fusion requires exactly two registered modalities")
@@ -267,21 +277,15 @@ class FusionAdapter:
             raise ValueError("Declare optical and SAR modalities")
         validate_pair([optical, sar])
         with rasterio.open(optical) as s2, rasterio.open(sar) as s1:
-            indexes = sentinel_fusion_indexes(s2, s1)
+            indexes = sen1floods11_fusion_indexes(s2, s1)
+            valid = (s2.dataset_mask() > 0) & (s1.dataset_mask() > 0)
+            require_shared_support(valid)
             inputs = []
             for source, bands, prefix in zip(
                 [s2, s1], indexes, ["s2", "s1"], strict=True
             ):
                 raw = source.read(bands, masked=True).astype(np.float32)
-                if (
-                    np.ma.getmaskarray(raw).any()
-                    or not np.isfinite(raw.data).all()
-                    or not (source.dataset_mask() > 0).all()
-                ):
-                    raise ValueError(
-                        "Use a shared-valid cropped fusion tile; missing pixels cannot be fabricated"
-                    )
-                array = torch.from_numpy(raw.data)
+                array = torch.from_numpy(np.ma.filled(raw, 0))
                 array = F.interpolate(
                     array[None],
                     (self.size, self.size),
@@ -292,30 +296,72 @@ class FusionAdapter:
                 std = torch.tensor(self.normalization[f"{prefix}_std"])[:, None, None]
                 inputs.append(((array - mean) / std)[None].to(self.device))
         with torch.inference_mode():
-            logits, _ = self.model(s2=inputs[0], s1=inputs[1])
+            logits = self.model(s2=inputs[0], s1=inputs[1])
             if not torch.isfinite(logits).all():
                 raise ValueError("Non-finite fusion predictions")
-            scores = logits.sigmoid()[0].cpu().numpy()
-        selected = np.flatnonzero(scores >= 0.5)
-        labels = ", ".join(self.labels[index] for index in selected)
+            flood_scores = logits.softmax(1)[0, 1].float().cpu().numpy()
+        candidate = resample_supported_mask(flood_scores >= 0.5, valid)
+        support = np.asarray(
+            Image.fromarray(valid).resize(candidate.shape[::-1], Image.Resampling.NEAREST)
+        ).astype(bool)
+        score_grid = np.asarray(
+            Image.fromarray(flood_scores).resize(
+                candidate.shape[::-1], Image.Resampling.BILINEAR
+            )
+        )
+        score = (
+            float(score_grid[candidate].mean())
+            if candidate.any()
+            else float(score_grid.max())
+        )
+        stream = io.BytesIO()
+        Image.fromarray(candidate.astype(np.uint8) * 255).save(stream, format="PNG")
+        flood_fraction = float(candidate.sum() / max(1, support.sum()))
         return SpecialistResponse(
             task="optical_sar_fusion",
-            text=f"Learned TerraMind optical/SAR scene-label candidates: {labels}."
-            if labels
-            else "No learned scene label exceeded the default 0.5 threshold.",
+            text=(
+                "The pixel-supervised TerraMind S1/S2 specialist marked "
+                f"{flood_fraction:.1%} of shared-valid pixels as flood/water candidates. "
+                "This is a Sen1Floods11-domain segmentation, not flood depth, cause, or a "
+                "validated Cartosat/RISAT result."
+            ),
             facts=[
-                {
-                    "name": "scene_class_scores",
-                    "value": dict(zip(self.labels, scores.tolist(), strict=True)),
-                },
-                {"name": "execution_mode", "value": "learned_cross_modal_fusion"},
+                {"name": "flood_candidate_fraction", "value": round(flood_fraction, 6)},
+                {"name": "execution_mode", "value": "learned_pixel_cross_modal_fusion"},
             ],
-            evidence=[],
-            raw_score=float(scores.max()),
+            evidence=[
+                Evidence(
+                    id="ev_learned_fusion_flood",
+                    type="mask",
+                    label=f"Learned flood/water candidate · {flood_fraction:.1%}",
+                    score=max(0.0, min(1.0, score)),
+                    coordinate_space="pixel",
+                    asset_id=next(
+                        asset.id
+                        for asset, _ in pairs
+                        if asset.modality in {"optical", "multispectral"}
+                    ),
+                    geometry={
+                        "encoding": "png-base64",
+                        "data": base64.b64encode(stream.getvalue()).decode(),
+                        "width": candidate.shape[1],
+                        "height": candidate.shape[0],
+                        "method": "TerraMind Sen1Floods11 pixel-supervised S1/S2 fusion",
+                        "target": "flood_water",
+                        "threshold": 0.5,
+                        "status": "candidate",
+                        "comparison_asset_id": next(
+                            asset.id for asset, _ in pairs if asset.modality == "sar"
+                        ),
+                    },
+                )
+            ],
+            raw_score=max(0.0, min(1.0, score)),
             score_kind="uncalibrated",
             model_version=self.version,
             warnings=[
-                "This artifact has scene-label supervision only: no precision masks are returned.",
-                "Sigmoid scores are uncalibrated; Cartosat and RISAT transfer requires separate training/evaluation.",
+                "Pixel softmax is uncalibrated; the score is not a correctness probability.",
+                "Sen1Floods11 validation does not establish India, Cartosat or RISAT accuracy.",
+                "Flood/water masks do not establish water depth, damage, cause or permanence.",
             ],
         )

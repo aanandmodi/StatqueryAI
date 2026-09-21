@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 # ---
 # jupyter:
 #   jupytext:
@@ -16,9 +17,12 @@
 # a closed answer head, and a real mask head supervised by differences between SECOND semantic maps.
 # It never calls the single-image Qwen adapter for change detection and never provisions paid hosting.
 #
-# **Before Run All:** attach the SECOND dataset as a Kaggle Dataset (or mount it in Colab). CDVQA's
-# repository contains QA annotations but not the underlying SECOND pixels. The notebook discovers
-# common folder layouts automatically and fails closed if a pair or label map is missing.
+# **Run All with GPU + Internet:** CDVQA annotations and matching SECOND images/labels download
+# automatically. The processed SECOND mirror is published by the PerASCD authors (not the original
+# SECOND publisher). Its revision and archive SHA256 are pinned; CDVQA defines our train/val/test
+# membership, NOT the mirror's folder names. No HF token or manual dataset attachment is required.
+# Source: https://github.com/SathShen/PerASCD (Dataset Preparation).
+# For research/demo use; the mirror's license tag does not override original imagery rights.
 
 # %% [markdown]
 # ## 0. Install and configure
@@ -50,21 +54,29 @@ class Config:
     seed: int = 42
     image_size: int = 256
     max_question_tokens: int = 32
-    batch_size: int = 16
+    batch_size: int = 8
     epochs: int = 8
     learning_rate: float = 2e-4
     weight_decay: float = 0.01
     mask_weight: float = 0.5
-    workers: int = 2
+    workers: int = 0
+    resume: bool = True
+    smoke_test: bool = False
+    run_test_once: bool = False
     max_train_qa: int | None = None
     max_validation_qa: int | None = None
+    max_test_qa: int | None = None
+    # Declare these only after reviewing validation; the notebook invents no target.
+    release_minimum_answer_accuracy: float | None = None
+    release_minimum_mask_iou: float | None = None
     repo_id: str = "aanandmodi/satquery-change-vqa-cdvqa"
     push_to_hub: bool = False
 
 
 CFG = Config()
 ROOT = Path("/kaggle/working/satquery-change" if Path("/kaggle/working").exists() else "/content/satquery-change")
-ANNOTATIONS, ARTIFACTS = ROOT / "annotations", ROOT / "artifacts"
+CDVQA_REVISION = "cc5893123dd32326de38745b65d2ffe45055937b"
+ANNOTATIONS, ARTIFACTS = ROOT / "annotations" / CDVQA_REVISION, ROOT / "artifacts"
 for path in (ANNOTATIONS, ARTIFACTS):
     path.mkdir(parents=True, exist_ok=True)
 random.seed(CFG.seed)
@@ -78,7 +90,7 @@ print({"config": asdict(CFG), "gpu": torch.cuda.get_device_name(0)})
 # ## 1. Download CDVQA annotations and locate SECOND imagery
 
 # %%
-CDVQA_BASE = "https://raw.githubusercontent.com/YZHJessica/CDVQA/main"
+CDVQA_BASE = f"https://raw.githubusercontent.com/YZHJessica/CDVQA/{CDVQA_REVISION}"
 for split in ("Train", "Val", "Test", "Test2"):
     for part in ("images", "questions", "answers"):
         filename = f"{split}_{part}.json"
@@ -94,7 +106,7 @@ def looks_like_second(root: Path) -> bool:
     return any(all((root / name).is_dir() for name in layout) for layout in layouts)
 
 
-def discover_second_root() -> Path:
+def discover_second_root() -> Path | None:
     explicit = os.environ.get("SECOND_ROOT", "").strip()
     candidates = [Path(explicit)] if explicit else []
     for parent in (Path("/kaggle/input"), Path("/content/drive/MyDrive"), Path("/content")):
@@ -103,13 +115,130 @@ def discover_second_root() -> Path:
     for candidate in candidates:
         if looks_like_second(candidate) or any(looks_like_second(candidate / split) for split in ("train", "val", "test")):
             return candidate
-    raise FileNotFoundError(
-        "SECOND imagery was not found. Attach the SECOND dataset, then set SECOND_ROOT to the folder "
-        "containing im1/im2/label1/label2 (or A/B/label1/label2)."
-    )
+    if explicit:
+        raise FileNotFoundError("SECOND_ROOT is set but does not contain supported images/labels.")
+    return None
 
 
-SECOND_ROOT = discover_second_root()
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def required_second_files(annotation_dir, splits=("Train", "Val", "Test")):
+    required = set()
+    seen = set()
+    for split in splits:
+        rows = json.loads((Path(annotation_dir) / f"{split}_images.json").read_text())["images"]
+        names = {str(row["file_name"]) for row in rows if row.get("active", True)}
+        if names & seen:
+            raise ValueError("CDVQA pair filenames overlap across train/validation/test.")
+        if any(Path(name).name != name or "/" in name or "\\" in name or not name.endswith(".png") for name in names):
+            raise ValueError("Unsafe or unexpected annotation filename.")
+        seen.update(names)
+        required.update((role, name) for role in ("im1", "im2", "label1", "label2") for name in names)
+    return required
+
+
+def extract_second_pairs(archive_path, destination, required):
+    """Select exact CDVQA filenames, without flattening unrequested augmentation or using extractall."""
+    import shutil
+    import zipfile
+    from pathlib import PurePosixPath
+    from PIL import Image
+
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        selected = {}
+        for info in archive.infolist():
+            parts = PurePosixPath(info.filename).parts
+            if info.is_dir() or len(parts) < 2:
+                continue
+            key = (parts[-2], parts[-1])
+            if key not in required:
+                continue
+            if ".." in parts or info.filename.startswith(("/", "\\")) or "\\" in info.filename:
+                raise ValueError("Unsafe SECOND archive path.")
+            if key in selected:
+                raise ValueError(f"Ambiguous duplicate SECOND pair member: {key}")
+            if info.file_size > 32 * 1024**2 or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError("Unexpected SECOND archive member type/size.")
+            selected[key] = info
+        missing = required - selected.keys()
+        if missing:
+            raise ValueError(f"Archive missing {len(missing)} required image/label files: {sorted(missing)[:4]}")
+        needed = sum(info.file_size for info in selected.values())
+        if shutil.disk_usage(destination).free < needed + 2 * 1024**3:
+            raise RuntimeError("Insufficient disk space for SECOND extraction plus checkpoint reserve.")
+        hashes = {}
+        for index, (key, info) in enumerate(sorted(selected.items())):
+            target = destination / key[0] / key[1]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            partial = target.with_suffix(".png.partial")
+            # ZipFile streams and checks member CRC; never hold the archive in RAM.
+            with archive.open(info) as source, partial.open("wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+            with Image.open(partial) as image:
+                if image.size != (512, 512):
+                    raise ValueError(f"Unexpected SECOND image dimensions: {info.filename}")
+                if key[0].startswith("label"):
+                    values = np.asarray(image)
+                    if values.ndim != 2 or values.dtype != np.uint8 or values.max() > 6:
+                        raise ValueError(f"Expected processed SECOND index labels 0..6: {info.filename}")
+                else:
+                    image.verify()
+            partial.replace(target)
+            hashes[f"{key[0]}/{key[1]}"] = sha256_file(target)
+            if (index + 1) % 1000 == 0:
+                print(f"Extracted and checked {index + 1}/{len(selected)} files", flush=True)
+    return hashes
+
+
+def download_second(annotation_dir, root):
+    import shutil
+    from huggingface_hub import hf_hub_download
+
+    repo = "SathShen/PerASCD-datasets"
+    revision = "c50fab55c275ffa55c113565af54cfa73e2bd709"
+    archive_sha = "e5d9be06636034bfff526f39b7ee3eb5d2a4bd145171238ed4cb4d1ffb588672"
+    destination = Path(root) / "second-cdvqa"
+    required = required_second_files(annotation_dir)
+    manifest_path = destination / "source_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text())
+        hashes = manifest.get("files_sha256", {})
+        expected_paths = {f"{role}/{name}" for role, name in required}
+        if (manifest.get("archive_sha256") == archive_sha and set(hashes) == expected_paths
+                and all((destination / name).is_file() and sha256_file(destination / name) == digest
+                        for name, digest in hashes.items())):
+            print("PASS: existing SECOND extraction hashes verified.")
+            return destination
+    # Archive is 3.78 GB; reserve for extracted images, HF partial download and training outputs.
+    if shutil.disk_usage(root).free < 10 * 1024**3:
+        raise RuntimeError("Keep at least 10 GiB free before automatic SECOND download/extraction.")
+    print("Downloading SECOND (3.78 GB) from the pinned PerASCD research mirror; no token needed.", flush=True)
+    archive = Path(hf_hub_download(repo_id=repo, repo_type="dataset", revision=revision,
+                                 filename="SECONDbi.zip", local_dir=Path(root) / "downloads", token=False))
+    if sha256_file(archive) != archive_sha:
+        raise ValueError("SECOND archive SHA256 differs from pinned Hub LFS object. Refusing training.")
+    hashes = extract_second_pairs(archive, destination, required)
+    manifest = {"source_repo": repo, "revision": revision, "archive_sha256": archive_sha,
+                "source_kind": "PerASCD author-published processed SECOND mirror",
+                "annotation_revision": CDVQA_REVISION, "split_authority": "CDVQA filenames, not mirror folders",
+                "files_sha256": hashes, "pairs": len(required) // 4}
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print({"PASS": "SECOND images and both real label maps verified", "pairs": manifest["pairs"]})
+    return destination
+
+
+SECOND_ROOT = discover_second_root() or download_second(ANNOTATIONS, ROOT)
+if (SECOND_ROOT / "source_manifest.json").exists():
+    import shutil
+    shutil.copyfile(SECOND_ROOT / "source_manifest.json", ARTIFACTS / "dataset_source_manifest.json")
 print({"SECOND_ROOT": str(SECOND_ROOT)})
 
 # %% [markdown]
@@ -157,17 +286,27 @@ def load_records(split: str, limit: int | None) -> list[dict]:
 
 train_records = load_records("Train", CFG.max_train_qa)
 validation_records = load_records("Val", CFG.max_validation_qa)
+test_records = load_records("Test", CFG.max_test_qa) if CFG.run_test_once else []
 # Official annotation IDs restart from zero within EACH split. They are not global image IDs.
 # SECOND filenames identify the underlying pair; checking local IDs falsely reports leakage.
 train_images = {row["filename"] for row in train_records}
 validation_images = {row["filename"] for row in validation_records}
+test_images = {row["filename"] for row in test_records}
 assert train_records and validation_records
 assert not train_images & validation_images, "Image-pair leakage between train and validation"
+assert not train_images & test_images, "Image-pair leakage between train and test"
+assert not validation_images & test_images, "Image-pair leakage between validation and test"
 print({"train_qa": len(train_records), "validation_qa": len(validation_records),
-       "train_pairs": len(train_images), "validation_pairs": len(validation_images)})
+       "train_pairs": len(train_images), "validation_pairs": len(validation_images),
+       "test_pairs": len(test_images)})
 (ARTIFACTS / "split_manifest.json").write_text(json.dumps({
     "identity": "SECOND pair filename, not split-local annotation ID",
     "train_pairs": sorted(train_images), "validation_pairs": sorted(validation_images),
+    "test_pairs": sorted(test_images),
+    "annotation_sha256": {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(ANNOTATIONS.glob("*.json"))
+    },
 }, indent=2), encoding="utf-8")
 
 # %% [markdown]
@@ -223,7 +362,9 @@ class ChangeDataset(Dataset):
         tokens = [word_vocab.get(token, 1) for token in TOKEN_PATTERN.findall(row["question"].lower())]
         tokens = (tokens[:CFG.max_question_tokens] + [0] * CFG.max_question_tokens)[:CFG.max_question_tokens]
         return {"time_a": time_a, "time_b": time_b, "tokens": torch.tensor(tokens),
-                "answer": torch.tensor(answer_vocab[row["answer"]]), "mask": mask}
+                "answer": torch.tensor(answer_vocab.get(row["answer"], -1)), "mask": mask,
+                "question_id": row["question_id"], "filename": row["filename"],
+                "question_text": row["question"], "reference_text": row["answer"]}
 
 
 class ChangeExpert(torch.nn.Module):
@@ -263,33 +404,124 @@ def objective(answer_logits, mask_logits, answers, masks):
     return answer_loss + CFG.mask_weight * mask_loss
 
 # %% [markdown]
-# ## 4. Train, validate, checkpoint
+# ## 4. Train, validate, checkpoint, and export auditable predictions
 
 # %%
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 from tqdm.auto import tqdm
 
 train_loader = DataLoader(ChangeDataset(train_records), batch_size=CFG.batch_size, shuffle=True,
                           num_workers=CFG.workers, pin_memory=True)
 validation_loader = DataLoader(ChangeDataset(validation_records), batch_size=CFG.batch_size, shuffle=False,
                                num_workers=CFG.workers, pin_memory=True)
+test_loader = (DataLoader(ChangeDataset(test_records), batch_size=CFG.batch_size, shuffle=False,
+                          num_workers=CFG.workers, pin_memory=True) if test_records else None)
 model = ChangeExpert(len(word_vocab), len(answer_vocab)).cuda()
 optimizer = torch.optim.AdamW(model.parameters(), lr=CFG.learning_rate, weight_decay=CFG.weight_decay)
 use_bf16 = torch.cuda.is_bf16_supported()
 autocast_dtype = torch.bfloat16 if use_bf16 else torch.float16
 scaler = torch.amp.GradScaler("cuda", enabled=not use_bf16)
-best = -1.0
-history = []
+best, start_epoch, history = -1.0, 0, []
+training_state = ARTIFACTS / "training_state.pt"
+if CFG.resume and training_state.is_file():
+    state = torch.load(training_state, map_location="cpu", weights_only=True)
+    model.load_state_dict(state["model"], strict=True)
+    optimizer.load_state_dict(state["optimizer"])
+    start_epoch, best, history = int(state["epoch"]), float(state["best"]), list(state["history"])
+    print({"resumed_after_epoch": start_epoch, "best_selection_score": best})
 
-for epoch in range(CFG.epochs):
+
+def true_runs(mask: np.ndarray) -> list[list[int]]:
+    indexes = np.flatnonzero(mask.reshape(-1))
+    if not len(indexes):
+        return []
+    runs, start, previous = [], int(indexes[0]), int(indexes[0])
+    for value in indexes[1:]:
+        value = int(value)
+        if value != previous + 1:
+            runs.append([start, previous - start + 1])
+            start = value
+        previous = value
+    runs.append([start, previous - start + 1])
+    return runs
+
+
+@torch.inference_mode()
+def evaluate(loader, split: str, prediction_path: Path | None = None) -> dict[str, float]:
+    model.eval()
+    answer_correct = answer_total = known_total = 0
+    intersection = union = predicted_pixels = target_pixels = 0
+    seen_pairs = set()
+    rows = []
+    for batch in tqdm(loader, desc=f"evaluate {split}"):
+        time_a, time_b = batch["time_a"].cuda(), batch["time_b"].cuda()
+        tokens = batch["tokens"].cuda()
+        with torch.autocast("cuda", dtype=autocast_dtype):
+            answer_logits, mask_logits = model(time_a, time_b, tokens)
+        answer_indexes = answer_logits.argmax(1).cpu()
+        references = batch["answer"]
+        known = references >= 0
+        answer_correct += int(((answer_indexes == references) & known).sum())
+        known_total += int(known.sum())
+        answer_total += len(references)
+        probabilities = torch.sigmoid(mask_logits).cpu().numpy()[:, 0]
+        predictions = probabilities >= 0.5
+        targets = batch["mask"].numpy()[:, 0] >= 0.5
+        for index, (prediction, probability, target) in enumerate(
+            zip(predictions, probabilities, targets, strict=True)
+        ):
+            item_intersection = int((prediction & target).sum())
+            item_union = int((prediction | target).sum())
+            pair_name = batch["filename"][index]
+            if pair_name not in seen_pairs:
+                seen_pairs.add(pair_name)
+                intersection += item_intersection
+                union += item_union
+                predicted_pixels += int(prediction.sum())
+                target_pixels += int(target.sum())
+            if prediction_path is not None:
+                predicted_answer = answer_values[int(answer_indexes[index])]
+                rows.append({
+                    "question_id": int(batch["question_id"][index]),
+                    "pair_filename": batch["filename"][index],
+                    "split": split,
+                    "question": batch["question_text"][index],
+                    "reference_answer": batch["reference_text"][index],
+                    "predicted_answer": predicted_answer,
+                    "answer_correct": predicted_answer == batch["reference_text"][index],
+                    "shape": list(prediction.shape),
+                    "intersection_pixels": item_intersection,
+                    "union_pixels": item_union,
+                    "mean_change_score": float(probability.mean()),
+                    "prediction_true_runs": true_runs(prediction),
+                    "reference_true_runs": true_runs(target),
+                })
+    metrics = {
+        "answer_accuracy": answer_correct / max(answer_total, 1),
+        "known_answer_examples": known_total,
+        "unknown_answer_examples": answer_total - known_total,
+        "unique_mask_pairs": len(seen_pairs),
+        "mask_iou": intersection / max(union, 1),
+        "mask_dice": 2 * intersection / max(predicted_pixels + target_pixels, 1),
+        "examples": len(loader.dataset),
+    }
+    if prediction_path is not None:
+        prediction_path.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+    return metrics
+
+
+for epoch in range(start_epoch, 1 if CFG.smoke_test else CFG.epochs):
     model.train()
     running = 0.0
     for batch in tqdm(train_loader, desc=f"train {epoch + 1}/{CFG.epochs}"):
-        batch = {key: value.cuda(non_blocking=True) for key, value in batch.items()}
+        tensors = {key: value.cuda(non_blocking=True) for key, value in batch.items()
+                   if isinstance(value, torch.Tensor)}
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast("cuda", dtype=autocast_dtype):
-            answer_logits, mask_logits = model(batch["time_a"], batch["time_b"], batch["tokens"])
-            loss = objective(answer_logits, mask_logits, batch["answer"], batch["mask"])
+            answer_logits, mask_logits = model(tensors["time_a"], tensors["time_b"], tensors["tokens"])
+            loss = objective(answer_logits, mask_logits, tensors["answer"], tensors["mask"])
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -297,38 +529,39 @@ for epoch in range(CFG.epochs):
         scaler.update()
         running += float(loss.detach())
 
-    model.eval()
-    correct = total = 0
-    intersection = union = predicted_pixels = target_pixels = 0
-    with torch.inference_mode():
-        for batch in validation_loader:
-            batch = {key: value.cuda(non_blocking=True) for key, value in batch.items()}
-            answers, masks = model(batch["time_a"], batch["time_b"], batch["tokens"])
-            correct += int((answers.argmax(1) == batch["answer"]).sum())
-            total += len(batch["answer"])
-            predicted, target = torch.sigmoid(masks) >= 0.5, batch["mask"] >= 0.5
-            intersection += int((predicted & target).sum())
-            union += int((predicted | target).sum())
-            predicted_pixels += int(predicted.sum())
-            target_pixels += int(target.sum())
+    validation = evaluate(validation_loader, "validation")
     metrics = {"epoch": epoch + 1, "train_loss": running / max(len(train_loader), 1),
-        "validation_accuracy": correct / max(total, 1), "mask_iou": intersection / max(union, 1),
-        "mask_dice": 2 * intersection / max(predicted_pixels + target_pixels, 1)}
+               **validation}
+    selection_score = 0.5 * (metrics["answer_accuracy"] + metrics["mask_iou"])
+    metrics["selection_score"] = selection_score
     history.append(metrics)
     print(metrics)
-    if metrics["validation_accuracy"] > best:
-        best = metrics["validation_accuracy"]
+    if selection_score > best:
+        best = selection_score
         save_file({name: value.detach().cpu().contiguous() for name, value in model.state_dict().items()},
                   ARTIFACTS / "model.safetensors")
         (ARTIFACTS / "config.json").write_text(json.dumps({"artifact_version": "satquery-pair-v2",
             "architecture": "shared_resnet18_gru_answer_mask", "mask_supervision": "SECOND changed semantic labels",
             "config": asdict(CFG), "word_vocab": word_vocab, "answer_vocab": answer_vocab,
             "best_metrics": metrics}, indent=2), encoding="utf-8")
+    torch.save({"epoch": epoch + 1, "best": best, "history": history,
+                "model": model.state_dict(), "optimizer": optimizer.state_dict()}, training_state)
 
 (ARTIFACTS / "training_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
 
+# Every reported result below comes from the selected best weights.
+model.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
+validation_predictions = ARTIFACTS / "validation_predictions.jsonl"
+validation_metrics = evaluate(validation_loader, "validation", validation_predictions)
+test_predictions = ARTIFACTS / "test_predictions.jsonl"
+test_metrics = evaluate(test_loader, "test", test_predictions) if test_loader else None
+(ARTIFACTS / "evaluation_summary.json").write_text(
+    json.dumps({"validation": validation_metrics, "test": test_metrics}, indent=2),
+    encoding="utf-8",
+)
+print(json.dumps({"validation": validation_metrics, "test": test_metrics}, indent=2))
+
 # Fresh architecture/weight reload, without downloading a second pretrained backbone.
-from safetensors.torch import load_file
 reloaded = ChangeExpert(len(word_vocab), len(answer_vocab), pretrained=False).cuda().eval()
 reloaded.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
 reload_batch = next(iter(validation_loader))
@@ -352,9 +585,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-manifest = {path.name: sha256(path) for path in sorted(ARTIFACTS.iterdir()) if path.is_file() and path.name != "sha256_manifest.json"}
+manifest = {path.name: sha256(path) for path in sorted(ARTIFACTS.iterdir())
+            if path.is_file() and path.name not in {"sha256_manifest.json", "training_state.pt"}}
 (ARTIFACTS / "sha256_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+thresholds_declared = (CFG.release_minimum_answer_accuracy is not None
+                       and CFG.release_minimum_mask_iou is not None)
+validation_passed = (thresholds_declared
+                     and validation_metrics["answer_accuracy"] >= CFG.release_minimum_answer_accuracy
+                     and validation_metrics["mask_iou"] >= CFG.release_minimum_mask_iou)
+test_passed = (thresholds_declared and test_metrics is not None
+               and test_metrics["answer_accuracy"] >= CFG.release_minimum_answer_accuracy
+               and test_metrics["mask_iou"] >= CFG.release_minimum_mask_iou)
 if CFG.push_to_hub:
+    if not validation_passed or not test_passed:
+        raise RuntimeError("Hub upload refused: declare and pass validation/test answer and mask gates first.")
     from huggingface_hub import HfApi
     token = os.environ.get("HF_TOKEN", "").strip()
     if not token and Path("/kaggle/working").exists():
@@ -365,12 +609,19 @@ if CFG.push_to_hub:
     api = HfApi(token=token)
     api.create_repo(CFG.repo_id, repo_type="model", private=False, exist_ok=True)
     api.upload_folder(repo_id=CFG.repo_id, repo_type="model", folder_path=ARTIFACTS,
-                      commit_message="Release audited SatQuery Change-VQA specialist")
+                      commit_message="Release audited SatQuery Change-VQA specialist",
+                      ignore_patterns=["training_state.pt"])
 
 gate = {"weights": (ARTIFACTS / "model.safetensors").is_file(),
         "config": (ARTIFACTS / "config.json").is_file(),
         "hash_manifest": (ARTIFACTS / "sha256_manifest.json").is_file(),
+        "raw_validation_predictions": validation_predictions.is_file(),
+        "release_thresholds_declared": thresholds_declared,
+        "validation_gate_passed": validation_passed,
+        "untouched_test_run_completed": test_metrics is not None,
+        "test_gate_passed": test_passed,
         "paid_endpoint_created": False}
 print(json.dumps(gate, indent=2))
-assert gate["weights"] and gate["config"] and gate["hash_manifest"] and not gate["paid_endpoint_created"]
-print("PASS — download artifacts or verify the Hub upload, save the notebook, then stop the GPU.")
+assert gate["weights"] and gate["config"] and gate["hash_manifest"] and gate["raw_validation_predictions"]
+assert not gate["paid_endpoint_created"]
+print("SAFE STOP — download artifacts, save the notebook version, then turn off the GPU.")

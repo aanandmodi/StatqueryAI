@@ -1,0 +1,107 @@
+{
+  "source_predictions": "/kaggle/working/satquery-eval/outputs/validation_predictions.jsonl",
+  "examples": 200,
+  "base": {
+    "vqa_exact_match": {
+      "value": 0.02,
+      "scene_bootstrap_95_ci": [
+        0.0,
+        0.05
+      ],
+      "examples": 100,
+      "scenes": 100
+    },
+    "grounding_mean_iou": {
+      "value": 0.016934620690000003,
+      "scene_bootstrap_95_ci": [
+        0.0,
+        0.04732498240816327
+      ],
+      "examples": 50,
+      "scenes": 49
+    },
+    "grounding_accuracy_iou_0_5": {
+      "value": 0.02,
+      "scene_bootstrap_95_ci": [
+        0.0,
+        0.061580670003848655
+      ],
+      "examples": 50,
+      "scenes": 49
+    },
+    "caption_token_f1": {
+      "value": 0.2811306119540001,
+      "scene_bootstrap_95_ci": [
+        0.26030669678505,
+        0.3005258975482
+      ],
+      "examples": 50,
+      "scenes": 50
+    }
+  },
+  "lora": {
+    "vqa_exact_match": {
+      "value": 0.57,
+      "scene_bootstrap_95_ci": [
+        0.47,
+        0.66
+      ],
+      "examples": 100,
+      "scenes": 100
+    },
+    "grounding_mean_iou": {
+      "value": 0.380729560932,
+      "scene_bootstrap_95_ci": [
+        0.30084575924068463,
+        0.45753005620227793
+      ],
+      "examples": 50,
+      "scenes": 49
+    },
+    "grounding_accuracy_iou_0_5": {
+      "value": 0.42,
+      "scene_bootstrap_95_ci": [
+        0.28,
+        0.5577499999999997
+      ],
+      "examples": 50,
+      "scenes": 49
+    },
+    "caption_token_f1": {
+      "value": 0.36517591683199996,
+      "scene_bootstrap_95_ci": [
+        0.34142700562219996,
+        0.38591087293844994
+      ],
+      "examples": 50,
+      "scenes": 50
+    }
+  },
+  "lora_minus_base": {
+    "vqa_exact_match": 0.5499999999999999,
+    "grounding_mean_iou": 0.363794940242,
+    "grounding_accuracy_iou_0_5": 0.39999999999999997,
+    "caption_token_f1": 0.08404530487799988
+  },
+  "calibration": {
+    "base": {
+      "status": "within-split scene-held-out diagnostic",
+      "temperature": 2.8772088153466995,
+      "fit_examples": 23,
+      "evaluation_examples": 77,
+      "raw_ece": 0.6135757421896103,
+      "temperature_scaled_ece": 0.5254421822501235,
+      "meaning": "Post-hoc correctness calibration derived from real sequence scores. It becomes a release claim only after the same frozen temperature is evaluated on an untouched organizer-prescribed test split."
+    },
+    "lora": {
+      "status": "within-split scene-held-out diagnostic",
+      "temperature": 1.4328580512512024,
+      "fit_examples": 23,
+      "evaluation_examples": 77,
+      "raw_ece": 0.20512201267402594,
+      "temperature_scaled_ece": 0.15027609510719095,
+      "meaning": "Post-hoc correctness calibration derived from real sequence scores. It becomes a release claim only after the same frozen temperature is evaluated on an untouched organizer-prescribed test split."
+    }
+  },
+  "scope": "Real recorded inference only. No change/fusion accuracy is reported until their trained checkpoints and held-out labels exist."
+}

@@ -101,6 +101,7 @@ export default function Archive() {
   return (
     <main className="document-shell">
       <StudioNav active="/archive" />
+      <div className="document-content">
       <header className="document-heading">
         <span className="eyebrow">03 / Historical evidence</span>
         <h1>One image is a starting point.</h1>
@@ -384,6 +385,7 @@ export default function Archive() {
           release.
         </p>
       </section>
+      </div>
     </main>
   );
 }

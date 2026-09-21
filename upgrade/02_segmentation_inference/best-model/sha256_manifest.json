@@ -1,0 +1,7 @@
+{
+  "config.json": "4552aa7fcf135fe29d7b79e91a59e4a07191e342e0f0f3e2f3a69e7fce832b2c",
+  "model.safetensors": "9b49f957f11885783b9d514a193e1c11d15070602840ecd09cc8557959c6d8d0",
+  "preprocessor_config.json": "5efb826f9a7f78c0316b914fe513a699a4410030110cede35f682055f22f0030",
+  "training_args.bin": "e9ad0bfe634c52d8ef3cb1d3054946e0171aa4f23df79d7de2baf46701cdf207",
+  "training_manifest.json": "66740133ee601030587c5bc6842d742df3bed0ef4e7be61aa7b49c515ac71607"
+}

@@ -18,7 +18,13 @@ from app.core.narrative import audit_visual_narrative
 from app.core.router import PolicyRouter
 from app.core.scene_report import build_scene_sections, pixel_area_m2
 from app.main import create_app
-from app.models.masks import decode_mask, encode_mask, materialize_masks, spectral_water_output
+from app.models.masks import (
+    decode_mask,
+    encode_mask,
+    evidence_class,
+    materialize_masks,
+    spectral_water_output,
+)
 from app.schemas import EvidenceItem, Modality, PlannedStep, SpecialistOutput, TaskType
 from app.storage import LocalArtifactStore
 
@@ -195,6 +201,7 @@ def test_ndwi_requires_explicit_bands_and_excludes_island(tmp_path, make_asset):
     "target,method,class_name",
     [
         ("vegetation", "NDVI", "vegetation"),
+        ("moisture", "NDMI", "vegetation-moisture"),
         ("built-up", "NDBI", "built-up"),
         ("burn", "NBR", "burn-scar"),
     ],
@@ -215,9 +222,30 @@ def test_sensor_qualified_spectral_masks(tmp_path, make_asset, target, method, c
     assert actual.evidence[0].geometry["method"].startswith(method)
     assert actual.evidence[0].geometry["target"] == class_name
     assert decode_mask(actual.evidence[0].geometry).any()
+    if method == "NDMI":
+        assert evidence_class(actual.evidence[0]) == "vegetation"
 
 
-def test_cartosat_refuses_swir_indexes(tmp_path, make_asset):
+def test_combined_vegetation_moisture_request_uses_ndmi(tmp_path, make_asset):
+    path = tmp_path / "sentinel-2.tif"
+    make_sentinel_raster(path)
+    step = PlannedStep(
+        step_id="step-1",
+        task=TaskType.GROUNDING,
+        asset_ids=["ast_a"],
+        permitted_params={"targets": ["vegetation", "moisture"]},
+        policy_reason="test",
+    )
+
+    actual = spectral_water_output(
+        output(), step, [make_asset("ast_a")], SimpleNamespace(resolve=lambda _: path)
+    )
+
+    assert actual.evidence[0].geometry["method"].startswith("NDMI")
+
+
+@pytest.mark.parametrize(("target", "method"), [("built-up", "NDBI"), ("moisture", "NDMI")])
+def test_cartosat_refuses_swir_indexes(tmp_path, make_asset, target, method):
     path = tmp_path / "cartosat.tif"
     data = np.full((4, 32, 32), 100, dtype=np.uint16)
     with rasterio.open(
@@ -230,22 +258,25 @@ def test_cartosat_refuses_swir_indexes(tmp_path, make_asset):
         dtype="uint16",
         crs="EPSG:32644",
         transform=from_origin(500000, 3200000, 10, 10),
-    ) as target:
-        target.write(data)
-        target.descriptions = ("B1", "B2", "B3", "B4")
-        target.update_tags(SatID="Cartosat-2S")
+    ) as raster:
+        raster.write(data)
+        raster.descriptions = ("B1", "B2", "B3", "B4")
+        raster.update_tags(SatID="Cartosat-2S")
     step = PlannedStep(
         step_id="step-1",
         task=TaskType.GROUNDING,
         asset_ids=["ast_a"],
-        permitted_params={"targets": ["built-up"]},
+        permitted_params={"targets": [target]},
         policy_reason="test",
     )
     actual = spectral_water_output(
         output(), step, [make_asset("ast_a")], SimpleNamespace(resolve=lambda _: path)
     )
     assert not actual.evidence
-    assert any("Cartosat-2-series cannot supply NDBI/NBR" in text for text in actual.warnings)
+    assert any(
+        f"{method} unavailable" in text and "no verified swir1 band" in text
+        for text in actual.warnings
+    )
 
 
 def test_materialization_recomputes_area_and_replaces_url(tmp_path, make_asset):

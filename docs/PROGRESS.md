@@ -1,5 +1,120 @@
 # Project progress
 
+## Recorded cloud training and final Qwen test — 2026-09-21
+
+- Qwen notebook 05 completed: 200 held-out examples, including 100 VQA, 50 grounding and 50
+  caption examples. LoRA VQA exact-match 0.61, grounding mean IoU 0.42267, grounding IoU≥0.5
+  accuracy 0.42 and caption token F1 0.40145. Frozen validation-temperature test ECE is 0.13041
+  versus raw ECE 0.15073. This is bounded Qwen evaluation, not mask calibration or ISRO validation.
+- Notebook 02 finished but failed release: mean IoU 0.35003 (<0.45), forest IoU 0.24929 (<0.35).
+  Water/agricultural class gates passed. Notebook 03 finished with answer accuracy 0.71334 and
+  validation mask IoU 0.39661 (<0.40); its test mask IoU was 0.41653. Do not lower the thresholds.
+- Notebook 04 exported an invalid numerical run: NaN losses throughout, NaN prediction-head
+  tensors and NaN scores on all labelled validation/test chips. Export hashes match; it is not a
+  damaged download. Both release gates failed. Do not resume or serve that checkpoint.
+- Fusion environment setup now pins the numeric and Hugging Face dependency families, retains
+  cloud CUDA wheels, and requires a kernel restart after installation changes. The import errors
+  are resolved in the reported cloud run; numerical training recovery is the next task.
+- Notebook 06 remains blocked by model-quality gates. No new production inference, public
+  deployment or calibrated probability release is claimed. Preserve completed 01/05 evidence;
+  revised 02–04 experiments must not use previous test results as tuning targets.
+- Raw evidence and manifests are in `upgrade/`; newly exported training binaries are excluded
+  from Git by default. Locally preserved failed artifacts are not deleted.
+
+## Orbital intelligence frontend redesign — 2026-09-20
+
+- Rebuilt the investigation screen as the approved command-center layout: dark navigation rail,
+  bounded evidence builder, large source-locked scene canvas and a persistent intelligence brief.
+- Preserved the existing upload, validation, routing, analysis, trace, case persistence and artifact
+  download behavior. This pass changes presentation and interaction hierarchy, not scientific output.
+- Added real source switching, paired-image split view, canvas zoom/fullscreen, evidence opacity,
+  dynamic returned-class legends, measured-area/coverage cards and provenance. Each element renders
+  only when the uploaded asset or controller response supplies the underlying value.
+- Removed the report/canvas mode switch so visual evidence and textual findings remain auditable
+  side by side. Empty, degraded and unavailable states are explicit; no demo scene, metric, mask,
+  confidence, status event or report text is synthesized in the browser.
+- Restyled Casebook, Archive and Methods under the same navy/paper/lime visual system and added
+  responsive layouts plus reduced-motion handling.
+- Verification: frontend lint and TypeScript passed, all **20** proxy/API tests passed, the production
+  build completed, and the desktop investigation and Casebook routes were visually checked in the
+  local browser. The current model gateway was unavailable during the final visual pass, and the UI
+  reported that degraded state rather than substituting sample results.
+- Unified the former home rail and document-page top navigation into one reusable sidebar on all
+  routes, with a responsive bottom-rail form on narrow screens.
+- Reworked Casebook with search/status filtering over real controller records, and rebuilt case
+  detail as a visual evidence dossier with source tabs, overlays, structured report sections, facts,
+  warnings, trace and provenance.
+- Added conditional Recharts views for returned mask coverage, confidence integration factors and
+  recorded trace durations. No chart renders from fallback constants or invented values.
+- Rechecked Investigation, Casebook, a stored optical/SAR case, Historical Evidence and Methods at
+  desktop width, plus the responsive Investigation layout. Lint, TypeScript, all 20 proxy tests and
+  the production build passed after the revision.
+- Refined the Investigation route with a three-stage workflow ribbon, custom Base UI selectors,
+  descriptive menu options, a richer investigation placeholder, interactive upload/composer states
+  and layered cartographic workspace textures. Decorative layers remain outside the evidence canvas.
+- Revalidated the custom dropdown in its expanded state and reviewed the settled desktop and
+  390-pixel mobile layouts. Lint, TypeScript, all 20 proxy tests and the production build passed.
+
+## Numbered Kaggle Run All pack — 2026-09-09
+
+- Added six standalone, numbered notebooks plus an upload guide and ZIP in `notebooks/kaggle-run-all`.
+  Validation/scoring, land-cover masks, learned temporal training, learned fusion training, frozen
+  calibration test and final ngrok serving now have explicit output-to-input handoffs.
+- The fusion pack downloads official Sen1Floods11 CSV splits and hand-labelled S1/S2/mask triplets,
+  checks source object generations/checksums, and converts the layout expected by training.
+- Final serving automatically discovers and verifies the three attached trained exports, loads
+  the user's SegFormer safetensors, includes quality/planner/paired routes, and prints a token-free
+  backend connection file before the existing attended waiting cell.
+- Fixed fusion optimizer resume and repeated optimizer recreation; change mask metrics now count
+  each image pair once and unknown answers count against total answer accuracy.
+- Verification: 287 backend/ML tests passed, notebook pack syntax/schema checks passed, and targeted
+  Python lint passed. Cloud GPU training/inference was not executed in this local validation.
+- SECOND pixels/labels remain a manual licensed-data attachment. Passing dataset-specific validation
+  does not complete calibration integration, representative ISRO evaluation or live paired API tests.
+
+## Pixel-supervised paired-model implementation — 2026-09-09
+
+- Replaced the TerraMind scene-classification notebook with a Sen1Floods11 v1.1 pixel-supervised
+  S2-L1C/S1-GRD flood segmentation pipeline. It preserves official disjoint split identities and
+  hashes, validates exact co-registration, ignores invalid labels, supports resume, and emits
+  reversible per-chip validation/test predictions plus real IoU/Dice/precision/recall metrics.
+- Added fused, optical-only and SAR-only ablations from the same best checkpoint and a fail-closed
+  release gate. The notebook will not upload until an operator-declared IoU target passes on both
+  validation and untouched test, with fused validation no worse than either single modality.
+- Added strict `satquery-pair-v3` serving with an exact 13-band Sentinel-2 L1C + Sentinel-1 VV/VH
+  contract and learned pixel-mask output. Cartosat/RISAT transfer remains explicitly unvalidated.
+- This closes the **implementation** gap, not the scientific release gate: Kaggle training,
+  held-out results, a pinned checkpoint and real pair HTTP verification are still required.
+- Hardened the ChangeVQA/SECOND notebook to resume training, select a checkpoint using both answer
+  accuracy and mask IoU, export reversible raw validation/test predictions, and refuse Hub upload
+  until declared validation and untouched-test gates pass.
+- Verification: **284 backend/ML tests and 20 proxy/API tests passed**; targeted Python lint,
+  frontend lint, TypeScript and the complete production frontend build passed.
+
+## Real validation aggregate and NDMI pass — 2026-09-08
+
+- Recorded the user-supplied, immutable-revision 200-row validation aggregate. The pinned LoRA
+  improved over the pinned base on VQA exact match (+0.55), grounding mean IoU (+0.3638),
+  grounding accuracy at IoU ≥ 0.5 (+0.40), and caption token F1 (+0.0840).
+- The aggregate is evidence of improvement, not a calibrated release artifact. Raw per-example
+  predictions, scene-cluster bootstrap intervals and the untouched test run remain required; the
+  uncalibrated confidence cap stays enabled.
+- Added Sentinel-2-only NDMI for vegetation-moisture/drought candidate mapping. Requests on
+  Cartosat or other inputs without a verified SWIR1 contract now refuse explicitly.
+- Added a named five-file TIFF demonstration pack and an exploration-profile option to the
+  five-workflow acceptance runner for display-only, non-georeferenced pairs.
+- Added learned-pair endpoint preference with observable method labels and automatic analytical
+  fallback. This is serving infrastructure only; no learned pair checkpoint is marked released.
+- Verification: **282 backend/ML tests and 20 proxy/API tests passed**; Python lint, frontend lint,
+  TypeScript and the production frontend build passed.
+- Real TIFF pair preflight passed locally: temporal analysis
+  `anl_68d261e5a2db4d27abf0f120bb317a57` returned two change masks, and optical/SAR analysis
+  `anl_ff3ac04b121040198030cd72e288b3b2` returned two proxy masks plus reports/overlays.
+
+Next actions: add `validation_predictions.jsonl`, run the local scorer, review error slices, then
+freeze calibration and run the untouched test split. Learned change/fusion checkpoints remain
+separate release gates.
+
 ## Semantic-mask and report-quality pass — 2026-09-08
 
 - Quality-v4 replaces the failed Qwen-box-first path for supported land-cover classes with a
@@ -246,6 +361,18 @@ flowchart LR
 The next user-operated steps are in [NGROK_KAGGLE_RUNBOOK.md](NGROK_KAGGLE_RUNBOOK.md).
 Learned change/fusion evaluation is a requirement for strong SIH semantic claims, not an optional
 cosmetic upgrade. The existing analytical tools are useful baselines, not proof of that quality.
+
+## Analyze workspace visual refinement — 2026-09-20
+
+- Rebuilt the no-source Evidence Canvas as an honest acquisition state with orbital scan graphics,
+  registration corners, supported evidence modes, and a working file-selection call to action.
+- Added designed empty states for the evidence sequence and Intelligence brief, including the real
+  validate → route → report workflow. No sample scene, invented region, placeholder score, or
+  synthetic analysis result was added.
+- Separated the home output column into rounded evidence, answer, and trace instruments over a
+  subtle cartographic field, improving hierarchy without changing analysis behavior.
+- Assigned a stable per-factor palette to the stored-case confidence donut and matching legend.
+  Browser inspection confirmed four returned factors rendered as four distinct SVG fills.
 
 ## Limits and deployment state
 

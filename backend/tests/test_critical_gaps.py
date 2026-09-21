@@ -18,7 +18,12 @@ from rasterio.enums import ColorInterp
 from app.config import Settings
 from app.core.planner import IntentProposal, propose_intents
 from app.core.router import PolicyRouter
-from app.core.sensors import semantic_indexes, sensor_profile, sentinel_fusion_indexes
+from app.core.sensors import (
+    semantic_indexes,
+    sen1floods11_fusion_indexes,
+    sensor_profile,
+    sentinel_fusion_indexes,
+)
 from app.models.gateway import HttpSpecialistGateway
 from app.models.mask_comparison import compare_mask_extent
 from app.models.masks import encode_mask, materialize_masks
@@ -76,6 +81,50 @@ def test_sentinel_swir_band_identity_is_explicit(tmp_path):
     )
     with rasterio.open(path) as source:
         assert semantic_indexes(source, ["nir", "swir1", "swir2"]) == [4, 5, 6]
+
+
+def test_pixel_fusion_requires_exact_sen1floods11_sensor_contract(tmp_path):
+    optical_path, sar_path = tmp_path / "s2.tif", tmp_path / "s1.tif"
+    order = [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12",
+    ]
+    write_raster(
+        optical_path,
+        order,
+        {"SatID": "Sentinel-2", "Representation": "toa_reflectance_10000"},
+    )
+    write_raster(
+        sar_path,
+        ["", ""],
+        {
+            "SatID": "Sentinel-1",
+            "Representation": "sigma0_db",
+            "TxRxPol1": "VV",
+            "TxRxPol2": "VH",
+        },
+    )
+    with rasterio.open(optical_path) as optical, rasterio.open(sar_path) as sar:
+        assert sen1floods11_fusion_indexes(optical, sar) == (list(range(1, 14)), [1, 2])
+    with rasterio.open(optical_path, "r+") as optical:
+        optical.update_tags(Representation="unknown")
+    with (
+        rasterio.open(optical_path) as optical,
+        rasterio.open(sar_path) as sar,
+        pytest.raises(ValueError, match="top-of-atmosphere"),
+    ):
+        sen1floods11_fusion_indexes(optical, sar)
 
 
 def test_conflicting_color_and_band_name_rejected(tmp_path):
@@ -341,6 +390,40 @@ def test_learned_change_support_and_readonly_pil_arrays():
     valid[:3] = False
     result = resample_supported_mask(np.ones((4, 4), bool), valid)
     assert result.shape == (10, 12) and result.sum() == 7 * 12
+
+
+def test_pixel_fusion_v3_artifact_integrity_contract(tmp_path):
+    from satquery_model_service.paired_adapters import verified_config
+
+    weights = tmp_path / "model.safetensors"
+    config_path = tmp_path / "config.json"
+    weights.write_bytes(b"test-only-v3-weights")
+    config_path.write_text(
+        json.dumps(
+            {
+                "artifact_version": "satquery-pair-v3",
+                "architecture": "terramind_s1_s2_pixel_flood_segmentation",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "sha256_manifest.json").write_text(
+        json.dumps(
+            {
+                "model.safetensors": hashlib.sha256(weights.read_bytes()).hexdigest(),
+                "config.json": hashlib.sha256(config_path.read_bytes()).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config, version = verified_config(tmp_path)
+    assert config["artifact_version"] == "satquery-pair-v3"
+    assert version.startswith("satquery-pair-v3:sha256:")
+
+    weights.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="integrity check failed"):
+        verified_config(tmp_path)
 
 
 def test_split_local_annotation_ids_do_not_define_leakage():

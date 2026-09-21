@@ -1,15 +1,15 @@
-# Critical-gap audit and implementation — 2026-09-04
+# Critical-gap audit and implementation — 2026-09-08
 
 This is the current status, not a claim of perfect accuracy. No website deployment, paid endpoint,
 new account credential or local GPU training is involved.
 
 | Judge's challenge | Implemented correction | Remaining release gate |
 |---|---|---|
-| “Are you only subtracting matrices?” | Analytical baselines remain explicitly labelled. Corrected ChangeVQA/SECOND training exports and strict serving share the **exact same architecture**; the learned mask is binary PNG, not a rectangle mislabelled as a mask. | Run corrected cloud training on licensed SECOND pixels + CDVQA questions, evaluate held-out scenes, then attach the artifact. No compatible trained change checkpoint was established in this session. |
-| “Where is learned optical/SAR fusion?” | TerraMind S2/S1 scene classifier training and serving now match. Native-resolution bands resize individually; LMDB buffers are copied within transactions; ablations use the saved best weights. | Run training and local/public HTTP verification. This head learns scene labels only. Precision fusion masks require pixel-supervised training, not thresholding its scene activations. |
+| “Are you only subtracting matrices?” | Analytical baselines remain explicitly labelled. Corrected ChangeVQA/SECOND training exports and strict serving share the **exact same architecture**; the learned mask is binary PNG, not a rectangle. Training now resumes, selects by answer+mask quality, exports reversible raw predictions, and refuses upload until declared validation and untouched-test gates pass. The controller prefers a configured learned pair endpoint and labels any analytical fallback. | Run cloud training on licensed SECOND pixels + CDVQA questions, pass the held-out gates, pin the artifact, then verify real pair HTTP inference. No compatible trained change checkpoint has passed yet. |
+| “Where is learned optical/SAR fusion?” | The replacement notebook trains a TerraMind S2-L1C/S1-GRD **pixel segmentation** head from Sen1Floods11 LabelHand masks. It preserves official disjoint splits and hashes, ignores invalid pixels, records reversible raw predictions, compares fused/S2-only/S1-only ablations from the same best checkpoint, and exports a strict `satquery-pair-v3` artifact. The runtime returns its learned flood mask and method provenance. | Run the notebook on Kaggle with the official data, choose a validation IoU threshold before release, pass validation plus untouched test gates, pin the artifact, and verify real paired HTTP inference. Until then the controller continues to label/use the analytical fallback. |
 | “Can one question require several tools?” | Learned closed-set intent proposal, deterministic DAG compiler, focused per-step questions, dependency validation, two date-specific segmentations, comparison and dependent loss/gain tool. | Existing Kaggle sessions must apply the live upgrade cell. Until `/v1/plan` works, provenance explicitly reports deterministic fallback. |
 | “What are Cartosat/RISAT inputs?” | Embedded platform/product/mode/band/polarization/RTC metadata is preserved. Numeric band aliases are sensor-qualified; conflicting tags and complex SAR fail safely. | External sidecar ingestion and ISRO-specific training/calibration are not implemented. Embed metadata using a reviewed preprocessing workflow; a filename or UI sensor label is not proof. |
-| “Where did these benchmark numbers come from?” | The fabricated random-number benchmark generator and every derived benchmark report were removed. The evaluation notebook now records paired base/LoRA predictions for the same held-out examples. | Run the notebook on Kaggle, retain the raw JSONL, score it locally and publish sample counts/split manifests with any result. |
+| “Where did these benchmark numbers come from?” | The fabricated random-number benchmark generator and every derived benchmark report were removed. A user-supplied 200-row validation aggregate with immutable base, adapter and dataset revisions is recorded under `docs/evaluation/`; LoRA improved all four reported aggregates. | Add the raw per-example JSONL and split manifest, run the local scene-bootstrap scorer, review error slices, then run the untouched test split before presenting a final number. |
 | “Why is confidence below 0.8?” | Uncalibrated values remain capped by design. Sequence likelihood is recorded only as a calibration input, never presented as correctness probability. | Fit on held-out validation scenes, freeze temperature/abstention policy, and evaluate once on an untouched test split before changing `score_kind`. |
 
 ## Bounded dynamic planning
@@ -79,8 +79,10 @@ review, not a claim of perfect boundaries or flood causality.”
 3. Optical-only / SAR-only / fused metrics on **the same saved checkpoint**, plus Indian-domain tests.
 4. Probability calibration and abstention tests; never describe raw softmax/sigmoid as confidence.
 5. Fresh architecture reload and real local HTTP, public tunnel, backend and UI case tests.
-6. Pixel-labelled training for any precision fusion-mask claim. The official
+6. A passing pixel-labelled checkpoint for any learned fusion-mask claim. The implemented notebook
+   follows the official
    [TerraMind Sen1Floods11 configuration](https://github.com/IBM/terramind/blob/main/configs/terramind_v1_base_sen1floods11.yaml)
-   is a relevant supervised flood-segmentation reference, not a drop-in universal mask artifact.
+   and [Sen1Floods11](https://github.com/cloudtostreet/Sen1Floods11) supervision contract. It is
+   still a flood-domain specialist, not a universal land-cover or Cartosat/RISAT model.
 
 See [paired expert runbook](PAIRED_EXPERT_RUNBOOK.md) for files and safe execution order.

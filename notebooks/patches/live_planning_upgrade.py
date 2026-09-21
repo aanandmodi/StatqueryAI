@@ -142,9 +142,7 @@ def sentinel_fusion_indexes(optical, sar):
     """TerraMind's training channels are not interchangeable with RISAT/Cartosat."""
     s2, s1 = sensor_profile(optical), sensor_profile(sar)
     if s2["platform"] != "sentinel-2" or s1["platform"] != "sentinel-1":
-        raise ValueError(
-            "Fusion requires Sentinel-2 and Sentinel-1; ISRO transfer is unvalidated"
-        )
+        raise ValueError("Fusion requires Sentinel-2 and Sentinel-1; ISRO transfer is unvalidated")
     order = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
     descriptions = [str(item or "").upper().strip() for item in optical.descriptions]
     if any(descriptions.count(name) != 1 for name in order):
@@ -156,6 +154,48 @@ def sentinel_fusion_indexes(optical, sar):
         raise ValueError("Calibrated sigma0 in dB must be declared; raw amplitude is unsupported")
     if s2["representation"].lower() != "surface_reflectance_10000":
         raise ValueError("S2 L2A reflectance scaled by 10000 must be declared")
+    return [descriptions.index(name) + 1 for name in order], [
+        pols.index(pol) + 1 for pol in ["VV", "VH"]
+    ]
+
+
+def sen1floods11_fusion_indexes(optical, sar):
+    """Validate the exact S2 L1C/S1 GRD contract used by the pixel fusion expert."""
+    s2, s1 = sensor_profile(optical), sensor_profile(sar)
+    if s2["platform"] != "sentinel-2" or s1["platform"] != "sentinel-1":
+        raise ValueError(
+            "Sen1Floods11 fusion requires Sentinel-2 and Sentinel-1; ISRO transfer is unvalidated"
+        )
+    order = [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12",
+    ]
+    descriptions = [str(item or "").upper().strip() for item in optical.descriptions]
+    if any(descriptions.count(name) != 1 for name in order):
+        raise ValueError(
+            "Explicit ordered Sentinel-2 L1C band names B01-B12 including B10 required"
+        )
+    pols = [band["polarization"] for band in s1["bands"]]
+    if any(pols.count(pol) != 1 for pol in ["VV", "VH"]):
+        raise ValueError("This expert requires Sentinel-1 VV/VH; other channels cannot substitute")
+    if s1["representation"].lower() not in {"sigma0_db", "sigma0db"}:
+        raise ValueError("Calibrated sigma0 in dB must be declared; raw amplitude is unsupported")
+    if s2["representation"].lower() not in {
+        "toa_reflectance_10000",
+        "top_of_atmosphere_reflectance_10000",
+    }:
+        raise ValueError("S2 L1C top-of-atmosphere reflectance scaled by 10000 must be declared")
     return [descriptions.index(name) + 1 for name in order], [
         pols.index(pol) + 1 for pol in ["VV", "VH"]
     ]

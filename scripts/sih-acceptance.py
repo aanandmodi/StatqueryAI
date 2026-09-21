@@ -35,11 +35,20 @@ def parse_args() -> argparse.Namespace:
         choices=("optical", "multispectral", "sar"),
         default="optical",
     )
+    parser.add_argument(
+        "--pair-profile",
+        choices=("strict", "exploration"),
+        default="strict",
+        help="Use exploration for display-only or non-georeferenced demonstration pairs.",
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--api-key")
-    parser.add_argument("--auto-route", action="store_true", help="Verify query-driven task selection")
     parser.add_argument(
-        "--allow-simulated", action="store_true",
+        "--auto-route", action="store_true", help="Verify query-driven task selection"
+    )
+    parser.add_argument(
+        "--allow-simulated",
+        action="store_true",
         help="Plumbing tests only: allow visibly simulated VLM output (not model acceptance)",
     )
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
@@ -48,14 +57,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def upload(
-    client: httpx.Client, base_url: str, path: Path, modality: str, role: str
+    client: httpx.Client,
+    base_url: str,
+    path: Path,
+    modality: str,
+    role: str,
+    *,
+    input_profile: str | None = None,
 ) -> dict[str, object]:
     suffix = path.suffix.lower()
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    exploration = suffix in {".jpg", ".jpeg", ".png", ".webp"}
+    exploration = (
+        input_profile == "exploration"
+        if input_profile is not None
+        else suffix in {".jpg", ".jpeg", ".png", ".webp"}
+    )
     pair_role = role in {"time_a", "time_b", "optical", "sar"}
     # Common images have only display RGB channels; never label them multispectral.
-    effective_modality = "optical" if exploration and modality == "multispectral" else modality
+    effective_modality = (
+        "optical" if exploration and modality == "multispectral" else modality
+    )
     with path.open("rb") as handle:
         response = client.post(
             f"{base_url}/assets",
@@ -70,7 +91,9 @@ def upload(
     response.raise_for_status()
     asset = response.json()
     if asset.get("validation_errors"):
-        raise RuntimeError(f"{path.name} failed validation: {asset['validation_errors']}")
+        raise RuntimeError(
+            f"{path.name} failed validation: {asset['validation_errors']}"
+        )
     return asset
 
 
@@ -118,7 +141,9 @@ def analyze(
     if not allow_simulated and any(
         str(version).startswith("demo-simulator") for version in model_versions.values()
     ):
-        raise RuntimeError(f"{task} returned a simulator response, not real model inference")
+        raise RuntimeError(
+            f"{task} returned a simulator response, not real model inference"
+        )
     if not result.get("trace"):
         raise RuntimeError(f"{task} result is missing the observable execution trace")
     return record
@@ -132,9 +157,7 @@ def save_artifacts(
     record: dict[str, object],
 ) -> None:
     analysis_id = str(record["id"])
-    (output / f"{task}.json").write_text(
-        json.dumps(record, indent=2), encoding="utf-8"
-    )
+    (output / f"{task}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     for suffix, endpoint in (("overlay.jpg", "overlay"), ("report.pdf", "report")):
         response = client.get(f"{base_url}/analyses/{analysis_id}/{endpoint}")
         response.raise_for_status()
@@ -155,15 +178,47 @@ def main() -> None:
         available = set(capabilities.json()["tasks"])
         required = {task for task, _ in TASKS}
         if missing_tasks := required - available:
-            raise RuntimeError(f"Controller is missing required tasks: {sorted(missing_tasks)}")
+            raise RuntimeError(
+                f"Controller is missing required tasks: {sorted(missing_tasks)}"
+            )
 
         base_url = args.base_url.rstrip("/")
         assets = {
-            "single": upload(client, base_url, args.single, args.single_modality, "primary"),
-            "time_a": upload(client, base_url, args.time_a, "optical", "time_a"),
-            "time_b": upload(client, base_url, args.time_b, "optical", "time_b"),
-            "optical": upload(client, base_url, args.optical, "multispectral", "optical"),
-            "sar": upload(client, base_url, args.sar, "sar", "sar"),
+            "single": upload(
+                client, base_url, args.single, args.single_modality, "primary"
+            ),
+            "time_a": upload(
+                client,
+                base_url,
+                args.time_a,
+                "optical",
+                "time_a",
+                input_profile=args.pair_profile,
+            ),
+            "time_b": upload(
+                client,
+                base_url,
+                args.time_b,
+                "optical",
+                "time_b",
+                input_profile=args.pair_profile,
+            ),
+            "optical": upload(
+                client,
+                base_url,
+                args.optical,
+                "optical",
+                "optical",
+                input_profile=args.pair_profile,
+            ),
+            "sar": upload(
+                client,
+                base_url,
+                args.sar,
+                "sar",
+                "sar",
+                input_profile=args.pair_profile,
+            ),
         }
         task_assets = {
             "single_vqa": [assets["single"]["id"]],
@@ -173,7 +228,8 @@ def main() -> None:
             "optical_sar_fusion": [assets["optical"]["id"], assets["sar"]["id"]],
         }
         summary: dict[str, object] = {
-            "capabilities": sorted(available), "runs": {},
+            "capabilities": sorted(available),
+            "runs": {},
             "scope": "integration only; not benchmark accuracy",
             "auto_route": args.auto_route,
             "allow_simulated": args.allow_simulated,
@@ -202,7 +258,11 @@ def main() -> None:
         (args.output / "summary.json").write_text(
             json.dumps(summary, indent=2), encoding="utf-8"
         )
-        label = "SIMULATOR-ALLOWED plumbing" if args.allow_simulated else "real-model integration"
+        label = (
+            "SIMULATOR-ALLOWED plumbing"
+            if args.allow_simulated
+            else "real-model integration"
+        )
         print(f"PASS {label}; evidence saved to {args.output.resolve()}")
 
 

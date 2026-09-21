@@ -36,28 +36,37 @@ Notebook: `notebooks/SatQuery_ChangeVQA_Training.ipynb`.
   closed-vocabulary answers and a supervised binary semantic-change mask. It is not a new
   fine-tune of the existing Qwen LoRA and it is not a flood-cause model.
 - Export is `artifact_version=satquery-pair-v2`, `model.safetensors`, `config.json`, training
-  history and `sha256_manifest.json`. A fresh architecture strictly reloads the saved weights
-  and runs a finite-output check. Keep Kaggle outputs/private input for serving.
+  history, raw validation/test JSONL and `sha256_manifest.json`. A fresh architecture strictly
+  reloads the selected weights and runs a finite-output check. Keep Kaggle outputs/private input
+  for serving.
 - Optional Hub storage uses `HF_TOKEN` in Kaggle Secrets with `push_to_hub=True`; storing weights
   does not create inference hosting. Default is no upload.
-- Training can still exceed free session time/VRAM. Tune batch size and sample limits openly;
-  do not claim a full benchmark result from a small subset. Optimizer-state resume and independent
-  test-set release automation remain future work; validation metrics alone are insufficient.
+- Training can still exceed free session time/VRAM. Optimizer/model state resumes from the local
+  artifact directory, but a Kaggle session reset still requires preserving that directory as a
+  private dataset/version. Tune sample limits openly; do not call a subset a full benchmark.
+  Hub upload is refused until operator-declared answer-accuracy and mask-IoU thresholds pass on
+  validation and the untouched test split.
 
-## 3. Train learned optical/SAR scene classification
+## 3. Train learned optical/SAR pixel fusion
 
 Notebook: `notebooks/SatQuery_TerraMind_Fusion_Training.ipynb`.
 
-- Uses an immutable BigEarthNet-derived paired LMDB dataset revision, actual S1/S2 channels,
-  official split labels and TerraMind normalization. Native-resolution bands resize separately.
-- TerraMind tiny/base is selected by available VRAM; the probed embedding width is recorded.
-- The saved best weights—not the last epoch—are evaluated with fused, optical-only and SAR-only
-  inputs. Class scores remain uncalibrated.
-- **This notebook does not train precision segmentation.** Scene labels supervise the head;
-  activation maps do not establish object boundaries. Runtime intentionally returns no fusion masks.
-- Serving expects declared Sentinel-2 L2A `surface_reflectance_10000`, Sentinel-1 `sigma0_db`, all
-  12 explicit S2 band descriptions, and explicitly identified VV/VH. It rejects Cartosat/RISAT
-  substitutions rather than silently fabricating channels.
+- Attach the official Sen1Floods11 v1.1 folders `S2L1CHand`, `S1GRDHand`, `LabelHand` and its
+  `flood_{train,valid,test}_data.txt` files. The notebook refuses missing triplets, duplicate IDs,
+  overlapping splits or non-co-registered grids and records SHA-256 for every split file.
+- TerraMind consumes all 13 declared Sentinel-2 L1C channels plus Sentinel-1 VV/VH. The head is a
+  two-class pixel decoder trained with cross-entropy plus Dice loss; invalid label `-1` is ignored.
+- The saved best validation-IoU weights—not the last epoch—are evaluated on fused, S2-only and
+  S1-only inputs. Validation/test JSONL retains reversible mask runs and per-chip intersections,
+  unions and flood fractions so reported metrics can be audited.
+- Export is the strict `satquery-pair-v3` architecture
+  `terramind_s1_s2_pixel_flood_segmentation`. Hub upload is refused unless an operator-declared
+  flood-IoU target passes on validation and untouched test and fused validation is no worse than
+  either single-modality ablation.
+- Serving accepts exactly declared Sentinel-2 L1C `toa_reflectance_10000` (or the equivalent
+  top-of-atmosphere label), all 13 bands B01–B12 including B10, and Sentinel-1 `sigma0_db` VV/VH.
+  It returns a learned flood/water candidate mask. It explicitly rejects Cartosat/RISAT transfer;
+  this checkpoint cannot justify arbitrary vegetation, building or burn-scar boundaries.
 
 ## 4. Load real paired artifacts behind the same ngrok service
 
@@ -76,16 +85,19 @@ Notebook: `notebooks/SatQuery_Optional_Paired_Runtime.ipynb`.
 5. Test real compatible pairs via `/v1/infer/change_vqa` and `/v1/infer/optical_sar_fusion` with
    the existing bearer token. Pair uploads require real byte SHA256 values and explicit roles.
    Masks return bounded PNG/base64 with valid source-grid geometry. Missing experts return 409.
-6. Only after **both** experts pass their tests, set root `.env`:
+6. After at least one learned expert has a pinned checkpoint and passes its held-out and HTTP
+   tests, set root `.env` and give each available expert its explicit URL:
 
    ```dotenv
    SATQUERY_PAIR_BACKEND=http
-   # Empty specialist URL overrides use the same SATQUERY_MODEL_SERVICE_URL.
+   SATQUERY_CHANGE_SERVICE_URL=https://YOUR-CHANGE-SERVICE
+   SATQUERY_FUSION_SERVICE_URL=https://YOUR-FUSION-SERVICE
    ```
 
-7. Restart only the local backend. Never set `pair_backend=http` expecting the old single-image
-   Qwen server to synthesize missing pair checkpoints. With only one expert trained, keep the
-   production controller baseline configuration and test that expert directly until both are ready.
+7. Restart only the local backend. The controller tries the learned endpoint and records its
+   learned method on success. A missing, incompatible or unreachable expert automatically returns
+   to the existing local analytical method and records the fallback reason. This availability
+   fallback is not permission to call the analytical result learned.
 
 ## 5. Test the compound controller workflow
 

@@ -1,5 +1,8 @@
 # SatQuery AI
 
+**Kaggle execution pack:** [six numbered notebooks and complete upload/run instructions](notebooks/kaggle-run-all/START_HERE.md).
+The final notebook includes quality, planning, trained pair loading and the attended ngrok server.
+
 SatQuery is a local-first, auditable remote-sensing assistant for satellite-image questions,
 captions, visual grounding, bi-temporal change analysis, and optical/SAR paired analysis. The
 released neural path uses the public
@@ -19,8 +22,9 @@ Managed Colab reverse-proxy serving is not supported; normal provider rules and 
 dependency plan and measured candidate loss/gain. The optional learned planner runs through the
 existing Kaggle service; apply the [one-cell notebook](notebooks/SatQuery_Live_Planning_Upgrade.ipynb)
 to an existing session. Cartosat/RISAT product metadata is recognized without guessing band identity.
-ChangeVQA/TerraMind training exports now match strict serving architectures. Their trained artifacts
-and accuracy evaluation **remain required**; no analytical baseline is renamed as a learned model.
+ChangeVQA training/serving and the new pixel-supervised TerraMind/Sen1Floods11 fusion notebook now
+match strict artifact contracts. Their trained artifacts and held-out accuracy evaluation **remain
+required**; no analytical baseline is renamed as a learned model.
 The last live service check reported quality-v3. Quality-v4 is prepared locally and must be applied
 inside the already-running Kaggle kernel before it can be claimed live.
 
@@ -57,7 +61,7 @@ and follow the [model-quality roadmap](docs/MODEL_QUALITY_ROADMAP.md).
 | Text answer, warnings, provenance, trace | Ready | Schema-validated integration and SQLite job record |
 | RGB preview, informative JPEG overlay, PDF report | Ready | Overlay always labels metadata/answer; boxes appear only when valid |
 | Bi-temporal change analysis | Runnable CPU baseline | Quantified spectral-change proxy + evidence; learned CDVQA notebook remains release-gated |
-| Optical/SAR paired analysis | Runnable CPU baseline | Optical-context/backscatter proxies + evidence; learned TerraMind notebook remains release-gated |
+| Optical/SAR paired analysis | Runnable CPU baseline; learned path implemented but unreleased | Optical-context/backscatter fallback; TerraMind Sen1Floods11 pixel-mask training/runtime requires a passing v3 checkpoint |
 | Automatic agentic routing | Ready | Query + input configuration select one of five registered workflows |
 | Website deployment | Deliberately not performed | Hosting will be selected only after local acceptance |
 
@@ -66,6 +70,10 @@ quality. Require the notebook smoke tests and real-image acceptance procedure be
 Real base-versus-LoRA instructions and the CPU-only scorer are in
 [the real evaluation runbook](docs/REAL_EVALUATION_RUNBOOK.md). No benchmark number is shipped
 unless it can be traced to raw per-example predictions.
+
+The current 200-row validation aggregate and its unresolved raw-artifact gate are recorded in
+[docs/evaluation](docs/evaluation/README.md). Jury-ready, use-case-labelled TIFF inputs and their
+SHA-256 manifest are in [demo-assets](demo-assets/README.md).
 
 ## Local topology
 

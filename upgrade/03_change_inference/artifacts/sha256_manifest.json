@@ -1,0 +1,10 @@
+{
+  "config.json": "d6a4d1c0516f2af6238b954ab82f16db3a5e3d3d21f90e202d8a684e7f0945e3",
+  "dataset_source_manifest.json": "55dfeb17032f444010a9ca964081e76a6711e10c683b92c6dcf0700226f0993c",
+  "evaluation_summary.json": "e08f16f5a817296123f0db46ad565773061b793cbe4d0bde844075e443074490",
+  "model.safetensors": "960082f19a997b38d789aa0d76dd36b569cba7e1baa9507a882f804cfc7a9586",
+  "split_manifest.json": "019665b91f27ad666c4267d308dbce06aed61762ab5ea4463c414fe01990c178",
+  "test_predictions.jsonl": "7e1e16904dc530fe2253e6538e9868996834fde6a63aeb44c18694d49a979e2b",
+  "training_history.json": "98a7ecc4dea1a91f14e83188cdd62407385d06031cdea9b5e4ac082bc7fa32ce",
+  "validation_predictions.jsonl": "c832da73a5fbc5c843a680be96956f27649383ff4b7114dbc7b3e8cba342782c"
+}

@@ -1,0 +1,20 @@
+{
+  "validation": {
+    "answer_accuracy": 0.7133386047077428,
+    "known_answer_examples": 16441,
+    "unknown_answer_examples": 0,
+    "unique_mask_pairs": 400,
+    "mask_iou": 0.3966147498809873,
+    "mask_dice": 0.567965861616147,
+    "examples": 16441
+  },
+  "test": {
+    "answer_accuracy": 0.7104268507786121,
+    "known_answer_examples": 39686,
+    "unknown_answer_examples": 0,
+    "unique_mask_pairs": 968,
+    "mask_iou": 0.4165327708456455,
+    "mask_dice": 0.5881018489914394,
+    "examples": 39686
+  }
+}

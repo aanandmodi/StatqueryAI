@@ -42,7 +42,10 @@ def evidence_class(item: EvidenceItem) -> str:
     combined = f"{declared} {label}"
     if "water" in combined or "flood" in combined:
         return "water"
-    if any(name in combined for name in ("vegetation", "forest", "crop", "ndvi")):
+    if any(
+        name in combined
+        for name in ("vegetation", "forest", "crop", "ndvi", "ndmi", "moisture", "drought")
+    ):
         return "vegetation"
     if any(name in combined for name in ("built", "urban", "building", "ndbi")):
         return "built-up"
@@ -58,12 +61,7 @@ def evidence_color(item: EvidenceItem) -> str:
 
 
 def _ring_area(ring: list[list[float]]) -> float:
-    return abs(
-        sum(
-            left[0] * right[1] - right[0] * left[1]
-            for left, right in pairwise(ring)
-        )
-    ) / 2
+    return abs(sum(left[0] * right[1] - right[0] * left[1] for left, right in pairwise(ring))) / 2
 
 
 def _bounded_ring(ring: list[list[float]], remaining: int) -> list[list[float]]:
@@ -144,6 +142,7 @@ def vectorize_mask(
 SPECTRAL_METHODS = {
     "NDWI (green - NIR) / (green + NIR)": ["green", "nir"],
     "NDVI (NIR - red) / (NIR + red)": ["nir", "red"],
+    "NDMI (NIR - SWIR1) / (NIR + SWIR1)": ["nir", "swir1"],
     "NDBI (SWIR1 - NIR) / (SWIR1 + NIR)": ["swir1", "nir"],
     "NBR (NIR - SWIR2) / (NIR + SWIR2)": ["nir", "swir2"],
 }
@@ -210,11 +209,7 @@ def decode_mask(geometry: dict) -> np.ndarray:
 
 def spectral_water_output(output, step, assets, asset_store):
     """Replace coarse boxes with a sensor-qualified spectral mask when the query permits it."""
-    if (
-        step.task != TaskType.GROUNDING
-        or len(assets) != 1
-        or assets[0].modality == Modality.SAR
-    ):
+    if step.task != TaskType.GROUNDING or len(assets) != 1 or assets[0].modality == Modality.SAR:
         return output
     asset = assets[0]
     with rasterio.open(asset_store.resolve(asset.id)) as source:
@@ -231,7 +226,6 @@ def spectral_water_output(output, step, assets, asset_store):
             "forest",
             "cropland",
             "agriculture",
-            "drought",
         }:
             meanings = ["nir", "red"]
             method = "NDVI (NIR - red) / (NIR + red)"
@@ -239,6 +233,30 @@ def spectral_water_output(output, step, assets, asset_store):
             target = "vegetation"
             threshold = float(step.permitted_params.get("threshold", 0.3))
             comparator = "greater"
+        elif (
+            targets
+            and targets & {"moisture", "drought"}
+            and targets
+            <= {
+                "vegetation",
+                "forest",
+                "cropland",
+                "agriculture",
+                "moisture",
+                "drought",
+            }
+        ):
+            meanings = ["nir", "swir1"]
+            method = "NDMI (NIR - SWIR1) / (NIR + SWIR1)"
+            if "drought" in targets:
+                label = "Low-moisture candidate (NDMI)"
+                target = "drought"
+                comparator = "less"
+            else:
+                label = "Vegetation-moisture candidate (NDMI)"
+                target = "vegetation-moisture"
+                comparator = "greater"
+            threshold = float(step.permitted_params.get("threshold", 0.0))
         elif targets and targets <= {"built-up", "urban", "building"}:
             meanings = ["swir1", "nir"]
             method = "NDBI (SWIR1 - NIR) / (SWIR1 + NIR)"
@@ -258,9 +276,11 @@ def spectral_water_output(output, step, assets, asset_store):
 
         profile = sensor_profile(source)
         if "swir" in " ".join(meanings) and profile["platform"] != "sentinel-2":
+            index_name = method.split(" ", 1)[0]
+            missing_band = next(name for name in meanings if name.startswith("swir"))
             warning = (
-                f"{method.split(' ', 1)[0]} unavailable: {profile['platform']} has no verified "
-                "SWIR band contract. Cartosat-2-series cannot supply NDBI/NBR."
+                f"{index_name} unavailable: {profile['platform']} has no verified "
+                f"{missing_band} band. Cartosat-2-series cannot supply {index_name}."
             )
             return output.model_copy(update={"warnings": [*output.warnings, warning]})
         indexes = semantic_indexes(source, meanings)

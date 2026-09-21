@@ -1,0 +1,11 @@
+{
+  "weights": true,
+  "config": true,
+  "hash_manifest": true,
+  "raw_validation_predictions": true,
+  "release_thresholds_declared": true,
+  "validation_gate_passed": false,
+  "untouched_test_run_completed": true,
+  "test_gate_passed": true,
+  "paid_endpoint_created": false
+}

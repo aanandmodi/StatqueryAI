@@ -8,7 +8,7 @@ import json
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Protocol
+from typing import ClassVar, Protocol
 from uuid import uuid4
 
 import httpx
@@ -634,9 +634,111 @@ class HybridSpecialistGateway:
                 await close()
 
 
+class FallbackPairSpecialistGateway:
+    """Prefer a configured learned pair service and fail over to audited CPU tools.
+
+    Selecting ``SATQUERY_PAIR_BACKEND=http`` is an explicit operator declaration that the
+    remote change/fusion service is a learned candidate. A transport/model failure never removes
+    the two mandatory paired workflows: the existing analytical gateway remains available and
+    the returned facts/warnings make the executed method observable.
+    """
+
+    LEARNED_METHODS: ClassVar[dict[TaskType, str]] = {
+        TaskType.CHANGE_VQA: "learned-cdvqa-v1",
+        TaskType.OPTICAL_SAR_FUSION: "learned-optical-sar-fusion-v1",
+    }
+    FALLBACK_METHODS: ClassVar[dict[TaskType, str]] = {
+        TaskType.CHANGE_VQA: "analytical-difference-baseline",
+        TaskType.OPTICAL_SAR_FUSION: "analytical-fusion-baseline",
+    }
+
+    def __init__(
+        self,
+        learned_gateway: SpecialistGateway,
+        analytical_gateway: SpecialistGateway,
+    ) -> None:
+        self.learned_gateway = learned_gateway
+        self.analytical_gateway = analytical_gateway
+
+    @staticmethod
+    def _label(
+        output: SpecialistOutput,
+        method: str,
+        *,
+        fallback_reason: str | None = None,
+    ) -> SpecialistOutput:
+        facts = [item for item in output.facts if item.get("name") != "pair_execution_method"]
+        facts.append({"name": "pair_execution_method", "value": method})
+        evidence = []
+        for item in output.evidence:
+            geometry = dict(item.geometry)
+            if existing_method := geometry.get("method"):
+                geometry["method_detail"] = existing_method
+            geometry["method"] = method
+            evidence.append(item.model_copy(update={"geometry": geometry}))
+        warnings = list(output.warnings)
+        if fallback_reason:
+            warnings.append(
+                "Learned pair specialist was unavailable; the request completed with the "
+                f"audited analytical fallback. Reason: {fallback_reason}"
+            )
+        return output.model_copy(
+            update={"facts": facts, "evidence": evidence, "warnings": warnings}
+        )
+
+    async def infer(
+        self,
+        step: PlannedStep,
+        assets: list[AssetRecord],
+        query: str,
+        context: GeospatialContext | None = None,
+    ) -> SpecialistOutput:
+        if step.task not in PAIR_TASKS:
+            raise ModelUnavailableError(
+                "The learned/fallback pair gateway cannot execute a single-image task",
+                details={"task": step.task.value},
+            )
+        try:
+            output = await self.learned_gateway.infer(step, assets, query, context)
+            return self._label(output, self.LEARNED_METHODS[step.task])
+        except ModelUnavailableError as exc:
+            output = await self.analytical_gateway.infer(step, assets, query, context)
+            return self._label(
+                output,
+                self.FALLBACK_METHODS[step.task],
+                fallback_reason=exc.message,
+            )
+
+    async def health(self) -> bool:
+        learned, analytical = await asyncio.gather(
+            self.learned_gateway.health(),
+            self.analytical_gateway.health(),
+            return_exceptions=True,
+        )
+        return learned is True or analytical is True
+
+    def versions(self) -> dict[str, str]:
+        return {**self.analytical_gateway.versions(), **self.learned_gateway.versions()}
+
+    def supported_tasks(self) -> list[str]:
+        return sorted(
+            set(self.learned_gateway.supported_tasks())
+            | set(self.analytical_gateway.supported_tasks())
+        )
+
+    async def close(self) -> None:
+        for gateway in (self.learned_gateway, self.analytical_gateway):
+            close = getattr(gateway, "close", None)
+            if close is not None:
+                await close()
+
+
 def build_gateway(settings: Settings, asset_store: LocalAssetStore) -> SpecialistGateway:
     pair_gateway: SpecialistGateway = (
-        HttpSpecialistGateway(settings, asset_store, allowed_tasks=PAIR_TASKS)
+        FallbackPairSpecialistGateway(
+            HttpSpecialistGateway(settings, asset_store, allowed_tasks=PAIR_TASKS),
+            LocalPairSpecialistGateway(asset_store),
+        )
         if settings.pair_backend == "http"
         else LocalPairSpecialistGateway(asset_store)
     )
