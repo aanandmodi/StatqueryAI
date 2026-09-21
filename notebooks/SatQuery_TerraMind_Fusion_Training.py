@@ -183,16 +183,18 @@ class Config:
     dataset_root: str = ""  # Attached official Sen1Floods11 v1.1; blank = detect.
     seed: int = 42
     image_size: int = 224
-    batch_size: int = 4
-    epochs: int = 8
+    batch_size: int = 2
+    epochs: int = 20
+    decoder_version: str = "conv-r2"
+    training_revision: str = "r2-finite-fp32"
     smoke_test: bool = False
     smoke_train_chips: int = 32
     smoke_validation_chips: int = 16
     head_learning_rate: float = 2e-4
-    backbone_learning_rate: float = 2e-5
+    backbone_learning_rate: float = 5e-6
     weight_decay: float = 0.01
     modality_drop_rate: float = 0.10
-    workers: int = 2
+    workers: int = 0
     resume: bool = True
     run_test_once: bool = False
     # Set only after validation review; the notebook does not invent a release target.
@@ -203,9 +205,9 @@ class Config:
 
 CFG = Config()
 ROOT = Path(
-    "/kaggle/working/satquery-fusion-segmentation"
+    "/kaggle/working/satquery-fusion-segmentation-r2"
     if Path("/kaggle/working").exists()
-    else "/content/satquery-fusion-segmentation"
+    else "/content/satquery-fusion-segmentation-r2"
 )
 ARTIFACTS = ROOT / "artifacts"
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
@@ -445,14 +447,14 @@ class FloodDataset(Dataset):
         with rasterio.open(paths[0]) as source:
             if source.count != 13:
                 raise ValueError(f"{identifier}: expected 13 Sentinel-2 L1C bands")
-            s2, valid = source.read().astype(np.float32), source.dataset_mask() > 0
+            s2 = source.read().astype(np.float32)
+            s2_valid = (source.read_masks() > 0).all(0) & np.isfinite(s2).all(0)
         with rasterio.open(paths[1]) as source:
             if source.count != 2:
                 raise ValueError(f"{identifier}: expected Sentinel-1 VV/VH")
-            s1, valid = (
-                source.read().astype(np.float32),
-                valid & (source.dataset_mask() > 0),
-            )
+            s1 = source.read().astype(np.float32)
+            s1_valid = (source.read_masks() > 0).all(0) & np.isfinite(s1).all(0)
+        valid = s2_valid & s1_valid
         with rasterio.open(paths[2]) as source:
             label = source.read(1).astype(np.int64)
             valid &= source.dataset_mask() > 0
@@ -460,6 +462,10 @@ class FloodDataset(Dataset):
         if unexpected:
             raise ValueError(f"{identifier}: unsupported labels {sorted(unexpected)}")
         label[~valid] = -1
+        # Ignore missing input pixels AND replace their input values before any
+        # interpolation/attention: NaN * zero is still NaN. Never repair logits or weights.
+        s2 = np.where(s2_valid[None], s2, TM_S2_MEAN.numpy()[:, None, None])
+        s1 = np.where(s1_valid[None], s1, TM_S1_MEAN.numpy()[:, None, None])
         s2 = F.interpolate(
             torch.from_numpy(s2)[None],
             (CFG.image_size, CFG.image_size),
@@ -477,8 +483,13 @@ class FloodDataset(Dataset):
             (CFG.image_size, CFG.image_size),
             mode="nearest",
         )[0, 0].long()
+        support = F.interpolate(torch.from_numpy(valid.astype(np.float32))[None, None],
+                                (CFG.image_size, CFG.image_size), mode="bilinear", align_corners=False)[0, 0]
+        target[support < 1 - 1e-6] = -1
         s2 = (s2 - TM_S2_MEAN[:, None, None]) / TM_S2_STD[:, None, None]
         s1 = (s1 - TM_S1_MEAN[:, None, None]) / TM_S1_STD[:, None, None]
+        if not torch.isfinite(s2).all() or not torch.isfinite(s1).all():
+            raise FloatingPointError(f"Non-finite normalized inputs: {identifier}")
         if self.training and random.random() < 0.5:
             s2, s1, target = s2.flip(-1), s1.flip(-1), target.flip(-1)
         if self.training and random.random() < 0.5:
@@ -490,13 +501,24 @@ class FusionExpert(torch.nn.Module):
     """TerraMind token head trained with real per-pixel flood labels."""
 
     def __init__(
-        self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224
+        self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224,
+        decoder_version: str = "legacy"
     ):
         super().__init__()
         self.backbone = backbone
+        if decoder_version not in {"legacy", "conv-r2"}:
+            raise ValueError("Unsupported fusion decoder version")
+        self.decoder_version = decoder_version
         self.norm = torch.nn.LayerNorm(embedding_dim)
         self.segmenter = torch.nn.Linear(embedding_dim, num_classes)
         self.num_classes, self.image_size = num_classes, image_size
+        if decoder_version == "conv-r2":
+            self.refine = torch.nn.Sequential(
+                torch.nn.Conv2d(embedding_dim, 128, 3, padding=1), torch.nn.GroupNorm(8, 128), torch.nn.GELU(),
+                torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                torch.nn.Conv2d(128, 64, 3, padding=1), torch.nn.GroupNorm(8, 64), torch.nn.GELU(),
+                torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                torch.nn.Conv2d(64, num_classes, 3, padding=1))
 
     def forward(self, *, s2=None, s1=None):
         inputs = {}
@@ -522,6 +544,10 @@ class FusionExpert(torch.nn.Module):
             .transpose(1, 2)
             .reshape(tokens.shape[0], self.num_classes, side, side)
         )
+        if self.decoder_version == "conv-r2":
+            grid = self.norm(tokens).transpose(1, 2).reshape(tokens.shape[0], -1, side, side)
+            detail = self.refine(grid)
+            logits = F.interpolate(logits, size=detail.shape[-2:], mode="bilinear", align_corners=False) + detail
         return F.interpolate(
             logits,
             (self.image_size, self.image_size),
@@ -551,7 +577,7 @@ test_loader = DataLoader(
     num_workers=CFG.workers,
     pin_memory=True,
 )
-backbone_name = "terramind_v1_tiny" if vram_gib < 22 else "terramind_v1_base"
+backbone_name = "terramind_v1_tiny"  # Fixed architecture across free GPUs; do not silently change experiments.
 backbone = BACKBONE_REGISTRY.build(
     backbone_name, pretrained=True, modalities=["S2L1C", "S1GRD"], merge_method="mean"
 ).cuda()
@@ -560,7 +586,7 @@ with torch.inference_mode():
     embedding_dim = backbone(
         {"S2L1C": probe["s2"].cuda(), "S1GRD": probe["s1"].cuda()}
     )[-1].shape[-1]
-model = FusionExpert(backbone, embedding_dim, 2, CFG.image_size).cuda()
+model = FusionExpert(backbone, embedding_dim, 2, CFG.image_size, decoder_version=CFG.decoder_version).cuda().float()
 del probe
 
 # %% [markdown]
@@ -570,14 +596,19 @@ del probe
 from safetensors.torch import load_file, save_file
 from tqdm.auto import tqdm
 
-use_bf16 = torch.cuda.is_bf16_supported()
-autocast_dtype = torch.bfloat16 if use_bf16 else torch.float16
-scaler = torch.amp.GradScaler("cuda", enabled=not use_bf16)
+# FP32 recovery profile: first establish a finite training run before benchmarking AMP.
+autocast_dtype = torch.float32
+scaler = torch.amp.GradScaler("cuda", enabled=False)
 for parameter in model.backbone.parameters():
     parameter.requires_grad = False
 
 
 def segmentation_loss(logits, target):
+    logits = logits.float()
+    if not torch.isfinite(logits).all():
+        raise FloatingPointError("Fusion logits are non-finite. Stop; do not export this candidate.")
+    if not (target >= 0).any():
+        return logits.sum() * 0.0
     cross_entropy = F.cross_entropy(logits, target, ignore_index=-1)
     valid, probability, truth = (
         target >= 0,
@@ -587,6 +618,26 @@ def segmentation_loss(logits, target):
     intersection = (probability * truth * valid).sum()
     denominator = (probability * valid).sum() + (truth * valid).sum()
     return cross_entropy + 1 - (2 * intersection + 1) / (denominator + 1)
+
+
+# One real labelled training batch, all modality paths, BEFORE the first epoch.
+# This checks gradients but does not update weights or consume validation/test for tuning.
+preflight = next((batch for batch in train_loader if (batch["target"] >= 0).any()), None)
+if preflight is None:
+    raise RuntimeError("No labelled training pixels after input validity masking.")
+model.eval()
+for mode in ("fused", "s2", "s1"):
+    model.zero_grad(set_to_none=True)
+    logits = model(s2=preflight["s2"].cuda() if mode != "s1" else None,
+                   s1=preflight["s1"].cuda() if mode != "s2" else None)
+    loss = segmentation_loss(logits, preflight["target"].cuda())
+    if not torch.isfinite(loss):
+        raise FloatingPointError(f"Preflight loss is non-finite: {mode}")
+    loss.backward()
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
+    print({"numerical_preflight": mode, "loss": float(loss.detach()), "gradient_norm": float(norm)})
+model.zero_grad(set_to_none=True)
+del preflight, logits, loss
 
 
 def true_runs(mask: np.ndarray) -> list[list[int]]:
@@ -610,8 +661,10 @@ def evaluate(
     for batch in tqdm(loader, desc=f"evaluate {mode}"):
         s2 = batch["s2"].cuda() if mode in {"fused", "s2"} else None
         s1 = batch["s1"].cuda() if mode in {"fused", "s1"} else None
-        with torch.autocast("cuda", dtype=autocast_dtype):
+        with torch.autocast("cuda", enabled=False):
             logits = model(s2=s2, s1=s1)
+        if not torch.isfinite(logits).all():
+            raise FloatingPointError(f"Non-finite evaluation logits: {mode}, {batch['id']}")
         probabilities = logits.softmax(1)[:, 1].float().cpu().numpy()
         predictions, targets = probabilities >= 0.5, batch["target"].numpy()
         for identifier, prediction, probability, target in zip(
@@ -623,7 +676,8 @@ def evaluate(
             ).reshape(2, 2)
             predicted_fraction = float(prediction[valid].mean()) if valid.any() else 0.0
             reference_fraction = float(reference[valid].mean()) if valid.any() else 0.0
-            fraction_errors.append(abs(predicted_fraction - reference_fraction))
+            if valid.any():
+                fraction_errors.append(abs(predicted_fraction - reference_fraction))
             if prediction_path is not None:
                 rows.append(
                     {
@@ -654,8 +708,10 @@ def evaluate(
         true_positive + false_positive + false_negative,
         (true_negative + false_positive + false_negative),
     )
-    flood_iou = true_positive / flood_union if flood_union else float("nan")
-    other_iou = true_negative / other_union if other_union else float("nan")
+    if not flood_union or not other_union or not fraction_errors:
+        raise ValueError("Evaluation has insufficient valid class support; no release metric can be computed.")
+    flood_iou = true_positive / flood_union
+    other_iou = true_negative / other_union
     metrics = {
         "flood_iou": float(flood_iou),
         "flood_dice": float(
@@ -674,7 +730,7 @@ def evaluate(
     }
     if prediction_path is not None:
         prediction_path.write_text(
-            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            "".join(json.dumps(row, allow_nan=False) + "\n" for row in rows), encoding="utf-8"
         )
     return metrics
 
@@ -695,6 +751,10 @@ if (
     and (ARTIFACTS / "model.safetensors").is_file()
 ):
     state = torch.load(training_state, map_location="cpu", weights_only=True)
+    if state.get("config") != asdict(CFG):
+        raise RuntimeError("Refuse old/incompatible training state. Preserve it; use the new r2 output directory.")
+    if not all(torch.isfinite(value).all() for value in state["model"].values()):
+        raise FloatingPointError("Refuse non-finite resume weights. The old failed 04 is not a warm start.")
     if "model" not in state or "optimizer" not in state:
         raise RuntimeError("Legacy resume state is incomplete. Use a fresh output directory.")
     model.load_state_dict(state["model"], strict=True)
@@ -708,36 +768,48 @@ if (
     print({"resumed_after_epoch": start_epoch, "best_flood_iou": best_iou})
 
 for epoch in range(start_epoch, 1 if CFG.smoke_test else CFG.epochs):
-    if epoch >= 1:
+    if epoch >= 2:
         for parameter in model.backbone.parameters():
             parameter.requires_grad = True
     model.train()
-    if epoch == 0:
+    if epoch < 2:
         model.backbone.eval()
-    running = 0.0
+    running, valid_batches, skipped_batches = 0.0, 0, 0
     for batch in tqdm(train_loader, desc=f"fusion segmentation {epoch + 1}"):
         optimizer.zero_grad(set_to_none=True)
         s2, s1, target = batch["s2"].cuda(), batch["s1"].cuda(), batch["target"].cuda()
+        if not (target >= 0).any():
+            skipped_batches += 1
+            continue
         draw = random.random()
         s2_input = None if draw < CFG.modality_drop_rate else s2
         s1_input = (
             None if CFG.modality_drop_rate <= draw < 2 * CFG.modality_drop_rate else s1
         )
-        with torch.autocast("cuda", dtype=autocast_dtype):
+        with torch.autocast("cuda", enabled=False):
             loss = segmentation_loss(model(s2=s2_input, s1=s1_input), target)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(f"Non-finite loss at epoch {epoch + 1}, chips {batch['id']}")
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
         scaler.step(optimizer)
         scaler.update()
         running += float(loss.detach())
+        valid_batches += 1
+    if not valid_batches:
+        raise RuntimeError("No labelled training batches; refusing an empty epoch.")
+    if not all(torch.isfinite(value).all() for value in model.state_dict().values()):
+        raise FloatingPointError("Non-finite model state; refuse checkpoint export.")
     validation = evaluate(validation_loader, "fused")
     row = {
         "epoch": epoch + 1,
-        "train_loss": running / max(1, len(train_loader)),
+        "train_loss": running / valid_batches,
+        "skipped_unlabelled_batches": skipped_batches,
         **validation,
     }
     history.append(row)
+    (ARTIFACTS / "training_history.json").write_text(json.dumps(history, indent=2, allow_nan=False))
     print(row)
     if validation["flood_iou"] > best_iou:
         best_iou = validation["flood_iou"]
@@ -751,7 +823,7 @@ for epoch in range(start_epoch, 1 if CFG.smoke_test else CFG.epochs):
     torch.save(
         {"epoch": epoch + 1, "best_iou": best_iou, "history": history,
          "model": model.state_dict(), "optimizer": optimizer.state_dict(),
-         "scaler": scaler.state_dict()}, training_state
+         "scaler": scaler.state_dict(), "config": asdict(CFG)}, training_state
     )
 
 # %% [markdown]
@@ -766,7 +838,10 @@ validation_metrics = {
     "s1": evaluate(validation_loader, "s1"),
 }
 test_metrics = None
-if CFG.run_test_once:
+validation_ready = (CFG.release_minimum_flood_iou is not None
+                    and validation_metrics["fused"]["flood_iou"] >= CFG.release_minimum_flood_iou
+                    and validation_metrics["fused"]["flood_iou"] >= max(validation_metrics[m]["flood_iou"] for m in ("s2", "s1")))
+if CFG.run_test_once and validation_ready:
     test_metrics = {
         "fused": evaluate(test_loader, "fused", ARTIFACTS / "test_predictions.jsonl"),
         "s2": evaluate(test_loader, "s2"),
@@ -796,12 +871,27 @@ config = {
     "score_semantics": "Pixel softmax is uncalibrated; IoU/Dice use hand labels.",
     "domain_gap": "Sentinel training does not establish Cartosat/RISAT or India-domain accuracy.",
 }
-(ARTIFACTS / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+(ARTIFACTS / "config.json").write_text(json.dumps(config, indent=2, allow_nan=False), encoding="utf-8")
 (ARTIFACTS / "evaluation_summary.json").write_text(
     json.dumps({"validation": validation_metrics, "test": test_metrics}, indent=2),
     encoding="utf-8",
 )
 print(json.dumps({"validation": validation_metrics, "test": test_metrics}, indent=2))
+
+# Fresh architecture reload, including the revised decoder, before release/export.
+reload_backbone = BACKBONE_REGISTRY.build(backbone_name, pretrained=False,
+    modalities=["S2L1C", "S1GRD"], merge_method="mean")
+reloaded = FusionExpert(reload_backbone, embedding_dim, 2, CFG.image_size,
+                        decoder_version=CFG.decoder_version).cuda().eval()
+reloaded.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
+reload_batch = next(iter(validation_loader))
+with torch.inference_mode():
+    reload_logits = reloaded(s2=reload_batch["s2"].cuda(), s1=reload_batch["s1"].cuda())
+assert torch.isfinite(reload_logits).all()
+assert reload_logits.shape == (len(reload_batch["id"]), 2, CFG.image_size, CFG.image_size)
+del reloaded, reload_backbone, reload_batch, reload_logits
+torch.cuda.empty_cache()
+print("PASS: fresh fusion architecture reloaded; finite outputs. Accuracy gates remain separate.")
 
 # %% [markdown]
 # ## 6. Hash, guarded free Hub upload, and safe stop
@@ -848,7 +938,7 @@ gate = {
     "release_threshold_declared": threshold_declared,
     "fused_not_worse_than_single_modality": ablation_passed,
     "validation_gate_passed": validation_passed,
-    "untouched_test_run_completed": test_metrics is not None,
+    "test_run_completed": test_metrics is not None,
     "test_gate_passed": test_passed,
     "paid_endpoint_created": False,
 }

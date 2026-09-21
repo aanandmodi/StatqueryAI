@@ -3,6 +3,22 @@
 This is the current status, not a claim of perfect accuracy. No website deployment, paid endpoint,
 new account credential or local GPU training is involved.
 
+## Update — 2026-09-21 (supersedes the older pending-run notes below)
+
+Actual 01/05 raw Qwen predictions and scorecards are now preserved in `upgrade/`; final test VQA
+exact-match is 0.61, grounding mean IoU 0.42267, caption token F1 0.40145. These do not establish
+mask quality or justify lifting the uncalibrated confidence cap. Temperature remains frozen from
+validation; the test scorecard explicitly disallows automatic probability release.
+
+02 was trained but failed mean/forest IoU targets. 03 was trained but failed validation mask IoU
+(0.39661 against 0.40). 04 finished execution but saved NaN head weights and is invalid. Therefore
+the learned specialist release gap remains **open**, not closed by notebook completion.
+
+[R2 revisions](TRAINING_R2.md) address scale mismatch, coarse mask decoding, loss balance and
+numerical failure without weakening acceptance thresholds. Revised code and matching serving
+architectures are available; new Kaggle runs and passing evidence are still required. Previously
+observed public test splits cannot now be described as newly untouched evaluation.
+
 | Judge's challenge | Implemented correction | Remaining release gate |
 |---|---|---|
 | “Are you only subtracting matrices?” | Analytical baselines remain explicitly labelled. Corrected ChangeVQA/SECOND training exports and strict serving share the **exact same architecture**; the learned mask is binary PNG, not a rectangle. Training now resumes, selects by answer+mask quality, exports reversible raw predictions, and refuses upload until declared validation and untouched-test gates pass. The controller prefers a configured learned pair endpoint and labels any analytical fallback. | Run cloud training on licensed SECOND pixels + CDVQA questions, pass the held-out gates, pin the artifact, then verify real pair HTTP inference. No compatible trained change checkpoint has passed yet. |

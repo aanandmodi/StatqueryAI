@@ -105,7 +105,8 @@ class ChangeAdapter:
             settings.device if torch.cuda.is_available() else "cpu"
         )
         self.model = ChangeExpert(
-            len(self.vocabulary), len(self.answers), pretrained=False
+            len(self.vocabulary), len(self.answers), pretrained=False,
+            decoder_version=config["config"].get("decoder_version", "legacy")
         )
         self.model.load_state_dict(load_file(root / "model.safetensors"), strict=True)
         self.model.to(self.device).eval()
@@ -247,7 +248,8 @@ class FusionAdapter:
             merge_method="mean",
         )
         self.model = FusionExpert(
-            backbone, int(config["embedding_dim"]), len(self.labels), self.size
+            backbone, int(config["embedding_dim"]), len(self.labels), self.size,
+            decoder_version=config["config"].get("decoder_version", "legacy")
         )
         self.model.load_state_dict(load_file(root / "model.safetensors"), strict=True)
         self.model.to(self.device).eval()
@@ -279,22 +281,24 @@ class FusionAdapter:
         with rasterio.open(optical) as s2, rasterio.open(sar) as s1:
             indexes = sen1floods11_fusion_indexes(s2, s1)
             valid = (s2.dataset_mask() > 0) & (s1.dataset_mask() > 0)
-            require_shared_support(valid)
             inputs = []
             for source, bands, prefix in zip(
                 [s2, s1], indexes, ["s2", "s1"], strict=True
             ):
-                raw = source.read(bands, masked=True).astype(np.float32)
-                array = torch.from_numpy(np.ma.filled(raw, 0))
+                raw = source.read(bands).astype(np.float32)
+                modality_valid = (source.read_masks(bands) > 0).all(0) & np.isfinite(raw).all(0)
+                valid &= modality_valid
+                mean = torch.tensor(self.normalization[f"{prefix}_mean"])[:, None, None]
+                std = torch.tensor(self.normalization[f"{prefix}_std"])[:, None, None]
+                array = torch.from_numpy(np.where(modality_valid[None], raw, mean.numpy()))
                 array = F.interpolate(
                     array[None],
                     (self.size, self.size),
                     mode="bilinear",
                     align_corners=False,
                 )[0]
-                mean = torch.tensor(self.normalization[f"{prefix}_mean"])[:, None, None]
-                std = torch.tensor(self.normalization[f"{prefix}_std"])[:, None, None]
                 inputs.append(((array - mean) / std)[None].to(self.device))
+            require_shared_support(valid)
         with torch.inference_mode():
             logits = self.model(s2=inputs[0], s1=inputs[1])
             if not torch.isfinite(logits).all():

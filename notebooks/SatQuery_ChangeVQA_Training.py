@@ -54,11 +54,13 @@ class Config:
     seed: int = 42
     image_size: int = 256
     max_question_tokens: int = 32
-    batch_size: int = 8
-    epochs: int = 8
-    learning_rate: float = 2e-4
+    batch_size: int = 4
+    epochs: int = 16
+    learning_rate: float = 5e-5
+    decoder_version: str = "multiscale-r2"
+    questions_per_pair: int = 4
     weight_decay: float = 0.01
-    mask_weight: float = 0.5
+    mask_weight: float = 2.0
     workers: int = 0
     resume: bool = True
     smoke_test: bool = False
@@ -74,7 +76,7 @@ class Config:
 
 
 CFG = Config()
-ROOT = Path("/kaggle/working/satquery-change" if Path("/kaggle/working").exists() else "/content/satquery-change")
+ROOT = Path("/kaggle/working/satquery-change-r2" if Path("/kaggle/working").exists() else "/content/satquery-change-r2")
 CDVQA_REVISION = "cc5893123dd32326de38745b65d2ffe45055937b"
 ANNOTATIONS, ARTIFACTS = ROOT / "annotations" / CDVQA_REVISION, ROOT / "artifacts"
 for path in (ANNOTATIONS, ARTIFACTS):
@@ -341,8 +343,9 @@ if unknown_answers:
 
 
 class ChangeDataset(Dataset):
-    def __init__(self, records: list[dict]):
+    def __init__(self, records: list[dict], training=False):
         self.records = records
+        self.training = training
         self.transform = transforms.Compose([
             transforms.Resize((CFG.image_size, CFG.image_size)), transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -359,6 +362,11 @@ class ChangeDataset(Dataset):
         mask = np.any(label_a != label_b, axis=-1) if label_a.ndim == 3 else label_a != label_b
         mask = F.interpolate(torch.from_numpy(mask.astype(np.float32))[None, None],
                              size=(CFG.image_size, CFG.image_size), mode="nearest")[0]
+        if self.training and not re.search(r"\b(left|right|north|south|east|west|top|bottom)\b", row["question"].lower()):
+            # Both dates and labels MUST receive the same spatial transform.
+            for dimension in (-1, -2):
+                if random.random() < 0.5:
+                    time_a, time_b, mask = time_a.flip(dimension), time_b.flip(dimension), mask.flip(dimension)
         tokens = [word_vocab.get(token, 1) for token in TOKEN_PATTERN.findall(row["question"].lower())]
         tokens = (tokens[:CFG.max_question_tokens] + [0] * CFG.max_question_tokens)[:CFG.max_question_tokens]
         return {"time_a": time_a, "time_b": time_b, "tokens": torch.tensor(tokens),
@@ -368,8 +376,11 @@ class ChangeDataset(Dataset):
 
 
 class ChangeExpert(torch.nn.Module):
-    def __init__(self, vocabulary_size, answer_classes, pretrained=True):
+    def __init__(self, vocabulary_size, answer_classes, pretrained=True, decoder_version="legacy"):
         super().__init__()
+        if decoder_version not in {"legacy", "multiscale-r2"}:
+            raise ValueError("Unsupported change decoder version")
+        self.decoder_version = decoder_version
         encoder = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1 if pretrained else None)
         self.stem = torch.nn.Sequential(encoder.conv1, encoder.bn1, encoder.relu, encoder.maxpool,
             encoder.layer1, encoder.layer2, encoder.layer3, encoder.layer4)
@@ -382,19 +393,45 @@ class ChangeExpert(torch.nn.Module):
             torch.nn.Dropout(0.2), torch.nn.Linear(512, answer_classes))
         self.mask_head = torch.nn.Sequential(torch.nn.Conv2d(256, 128, 3, padding=1),
             torch.nn.GELU(), torch.nn.Conv2d(128, 1, 1))
+        if decoder_version == "multiscale-r2":
+            self.laterals = torch.nn.ModuleList([
+                torch.nn.Sequential(torch.nn.Conv2d(channels * 4, 64, 1),
+                    torch.nn.GroupNorm(8, 64), torch.nn.GELU())
+                for channels in (64, 128, 256)])
+            self.detail_head = torch.nn.Sequential(torch.nn.Conv2d(256 + 192, 128, 3, padding=1),
+                torch.nn.GroupNorm(8, 128), torch.nn.GELU(), torch.nn.Conv2d(128, 1, 1))
 
-    def forward(self, time_a, time_b, tokens):
-        feature_a, feature_b = self.stem(time_a), self.stem(time_b)
+    def encode_pair(self, time_a, time_b):
+        feature_a, feature_b = time_a, time_b
+        details = []
+        for index, layer in enumerate(self.stem):
+            feature_a, feature_b = layer(feature_a), layer(feature_b)
+            if self.decoder_version == "multiscale-r2" and index in (4, 5, 6):
+                joined = torch.cat([feature_a, feature_b, (feature_a-feature_b).abs(), feature_a*feature_b], 1)
+                details.append(self.laterals[index - 4](joined))
         fused = self.fuse(torch.cat([feature_a, feature_b, (feature_a-feature_b).abs(), feature_a*feature_b], 1))
         visual = F.adaptive_avg_pool2d(fused, 1).flatten(1)
+        mask = self.mask_head(fused)
+        if details:
+            size = details[0].shape[-2:]
+            features = [F.interpolate(x, size=size, mode="bilinear", align_corners=False) for x in [fused, *details]]
+            mask = F.interpolate(mask, size=size, mode="bilinear", align_corners=False) + self.detail_head(torch.cat(features, 1))
+        return visual, F.interpolate(mask, size=time_a.shape[-2:], mode="bilinear", align_corners=False)
+
+    def answer_from_visual(self, visual, tokens):
         _, hidden = self.question(self.embedding(tokens))
         question = torch.cat([hidden[-2], hidden[-1]], 1)
-        answer = self.answer_head(torch.cat([visual, question], 1))
-        mask = F.interpolate(self.mask_head(fused), size=time_a.shape[-2:], mode="bilinear", align_corners=False)
-        return answer, mask
+        return self.answer_head(torch.cat([visual, question], 1))
+
+    def forward(self, time_a, time_b, tokens):
+        visual, mask = self.encode_pair(time_a, time_b)
+        return self.answer_from_visual(visual, tokens), mask
 
 
 def objective(answer_logits, mask_logits, answers, masks):
+    answer_logits, mask_logits, masks = answer_logits.float(), mask_logits.float(), masks.float()
+    if not torch.isfinite(answer_logits).all() or not torch.isfinite(mask_logits).all():
+        raise FloatingPointError("Non-finite change logits; stop without publishing.")
     answer_loss = F.cross_entropy(answer_logits, answers)
     bce = F.binary_cross_entropy_with_logits(mask_logits, masks)
     probability = torch.sigmoid(mask_logits)
@@ -410,21 +447,54 @@ def objective(answer_logits, mask_logits, answers, masks):
 from safetensors.torch import load_file, save_file
 from tqdm.auto import tqdm
 
-train_loader = DataLoader(ChangeDataset(train_records), batch_size=CFG.batch_size, shuffle=True,
+train_loader = DataLoader(ChangeDataset(train_records, training=True), batch_size=CFG.batch_size, shuffle=True,
                           num_workers=CFG.workers, pin_memory=True)
-validation_loader = DataLoader(ChangeDataset(validation_records), batch_size=CFG.batch_size, shuffle=False,
+validation_loader = DataLoader(ChangeDataset(sorted(validation_records, key=lambda row: row["filename"])), batch_size=CFG.batch_size, shuffle=False,
                                num_workers=CFG.workers, pin_memory=True)
-test_loader = (DataLoader(ChangeDataset(test_records), batch_size=CFG.batch_size, shuffle=False,
+test_loader = (DataLoader(ChangeDataset(sorted(test_records, key=lambda row: row["filename"])), batch_size=CFG.batch_size, shuffle=False,
                           num_workers=CFG.workers, pin_memory=True) if test_records else None)
-model = ChangeExpert(len(word_vocab), len(answer_vocab)).cuda()
+model = ChangeExpert(len(word_vocab), len(answer_vocab), decoder_version=CFG.decoder_version).cuda()
+# Optional previous 03 input: retain learned answers, initialize only the NEW detail decoder.
+# Never import an optimizer, gate or metrics as if the new candidate had passed.
+warm_candidates = []
+for path in Path("/kaggle/input").rglob("config.json"):
+    try:
+        config = json.loads(path.read_text())
+    except (ValueError, OSError):
+        continue
+    if config.get("architecture") == "shared_resnet18_gru_answer_mask":
+        warm_candidates.append((path.parent, config))
+if len(warm_candidates) > 1:
+    raise RuntimeError("Attach at most one previous 03 output.")
+warm_start = None
+if warm_candidates:
+    previous, previous_config = warm_candidates[0]
+    if previous_config["word_vocab"] != word_vocab or previous_config["answer_vocab"] != answer_vocab:
+        raise RuntimeError("Previous 03 vocabulary differs; refuse unsafe warm start.")
+    weight_sha = hashlib.sha256((previous / "model.safetensors").read_bytes()).hexdigest()
+    if json.loads((previous / "sha256_manifest.json").read_text()).get("model.safetensors") != weight_sha:
+        raise RuntimeError("Previous 03 checksum mismatch.")
+    weights = load_file(previous / "model.safetensors")
+    if not all(torch.isfinite(value).all() for value in weights.values()):
+        raise FloatingPointError("Previous change weights are non-finite.")
+    result = model.load_state_dict(weights, strict=False)
+    if result.unexpected_keys or any(not name.startswith(("laterals.", "detail_head.")) for name in result.missing_keys):
+        raise RuntimeError(f"Incompatible warm start: {result}")
+    warm_start = {"weights_sha256": weight_sha}
+    del weights
+print({"warm_start": warm_start, "decoder": CFG.decoder_version})
 optimizer = torch.optim.AdamW(model.parameters(), lr=CFG.learning_rate, weight_decay=CFG.weight_decay)
 use_bf16 = torch.cuda.is_bf16_supported()
-autocast_dtype = torch.bfloat16 if use_bf16 else torch.float16
-scaler = torch.amp.GradScaler("cuda", enabled=not use_bf16)
+autocast_dtype = torch.bfloat16 if use_bf16 else torch.float32
+scaler = torch.amp.GradScaler("cuda", enabled=False)
 best, start_epoch, history = -1.0, 0, []
 training_state = ARTIFACTS / "training_state.pt"
 if CFG.resume and training_state.is_file():
     state = torch.load(training_state, map_location="cpu", weights_only=True)
+    if state.get("config") != asdict(CFG) or state.get("warm_start") != warm_start:
+        raise RuntimeError("Resume configuration differs. Use a fresh r2 output; preserve old files.")
+    if not all(torch.isfinite(value).all() for value in state["model"].values()):
+        raise FloatingPointError("Refusing non-finite resume state.")
     model.load_state_dict(state["model"], strict=True)
     optimizer.load_state_dict(state["optimizer"])
     start_epoch, best, history = int(state["epoch"]), float(state["best"]), list(state["history"])
@@ -452,19 +522,35 @@ def evaluate(loader, split: str, prediction_path: Path | None = None) -> dict[st
     answer_correct = answer_total = known_total = 0
     intersection = union = predicted_pixels = target_pixels = 0
     seen_pairs = set()
+    visual_cache = {}  # Only current pair(s), never a full validation prediction cache.
     rows = []
     for batch in tqdm(loader, desc=f"evaluate {split}"):
         time_a, time_b = batch["time_a"].cuda(), batch["time_b"].cuda()
         tokens = batch["tokens"].cuda()
-        with torch.autocast("cuda", dtype=autocast_dtype):
-            answer_logits, mask_logits = model(time_a, time_b, tokens)
+        with torch.autocast("cuda", dtype=autocast_dtype, enabled=use_bf16):
+            missing = {}
+            for index, name in enumerate(batch["filename"]):
+                if name not in visual_cache:
+                    missing.setdefault(name, index)
+            if missing:
+                positions = list(missing.values())
+                visuals, masks = model.encode_pair(time_a[positions], time_b[positions])
+                for offset, name in enumerate(missing):
+                    visual_cache[name] = (visuals[offset:offset+1], masks[offset:offset+1])
+            visual = torch.cat([visual_cache[name][0] for name in batch["filename"]])
+            mask_logits = torch.cat([visual_cache[name][1] for name in batch["filename"]])
+            answer_logits = model.answer_from_visual(visual, tokens)
+            last_name = batch["filename"][-1]
+            visual_cache = {last_name: visual_cache[last_name]}
+        if not torch.isfinite(answer_logits).all() or not torch.isfinite(mask_logits).all():
+            raise FloatingPointError("Evaluation returned non-finite logits.")
         answer_indexes = answer_logits.argmax(1).cpu()
         references = batch["answer"]
         known = references >= 0
         answer_correct += int(((answer_indexes == references) & known).sum())
         known_total += int(known.sum())
         answer_total += len(references)
-        probabilities = torch.sigmoid(mask_logits).cpu().numpy()[:, 0]
+        probabilities = torch.sigmoid(mask_logits.float()).cpu().numpy()[:, 0]
         predictions = probabilities >= 0.5
         targets = batch["mask"].numpy()[:, 0] >= 0.5
         for index, (prediction, probability, target) in enumerate(
@@ -513,18 +599,30 @@ def evaluate(loader, split: str, prediction_path: Path | None = None) -> dict[st
 
 
 for epoch in range(start_epoch, 1 if CFG.smoke_test else CFG.epochs):
+    # Equal pair exposure; rotate QA choices each epoch, instead of re-training
+    # the same mask dozens of times for pairs with more questions.
+    grouped = {}
+    for record in train_records:
+        grouped.setdefault(record["filename"], []).append(record)
+    epoch_rng = random.Random(CFG.seed + epoch)
+    selected = [row for rows in grouped.values()
+                for row in epoch_rng.sample(rows, min(CFG.questions_per_pair, len(rows))) ]
+    train_loader = DataLoader(ChangeDataset(selected, training=True), batch_size=CFG.batch_size,
+                              shuffle=True, num_workers=0, pin_memory=False)
     model.train()
     running = 0.0
     for batch in tqdm(train_loader, desc=f"train {epoch + 1}/{CFG.epochs}"):
         tensors = {key: value.cuda(non_blocking=True) for key, value in batch.items()
                    if isinstance(value, torch.Tensor)}
         optimizer.zero_grad(set_to_none=True)
-        with torch.autocast("cuda", dtype=autocast_dtype):
+        with torch.autocast("cuda", dtype=autocast_dtype, enabled=use_bf16):
             answer_logits, mask_logits = model(tensors["time_a"], tensors["time_b"], tensors["tokens"])
             loss = objective(answer_logits, mask_logits, tensors["answer"], tensors["mask"])
+        if not torch.isfinite(loss):
+            raise FloatingPointError(f"Non-finite loss at epoch {epoch + 1}; stop.")
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
         scaler.step(optimizer)
         scaler.update()
         running += float(loss.detach())
@@ -532,19 +630,26 @@ for epoch in range(start_epoch, 1 if CFG.smoke_test else CFG.epochs):
     validation = evaluate(validation_loader, "validation")
     metrics = {"epoch": epoch + 1, "train_loss": running / max(len(train_loader), 1),
                **validation}
-    selection_score = 0.5 * (metrics["answer_accuracy"] + metrics["mask_iou"])
+    # Optimize the weakest normalized validation gate, not the average that
+    # previously preferred a strong answer head with a failing mask.
+    selection_score = min(metrics["answer_accuracy"] / (CFG.release_minimum_answer_accuracy or 0.60),
+                          metrics["mask_iou"] / (CFG.release_minimum_mask_iou or 0.40))
     metrics["selection_score"] = selection_score
     history.append(metrics)
+    (ARTIFACTS / "training_history.json").write_text(json.dumps(history, indent=2, allow_nan=False))
     print(metrics)
     if selection_score > best:
+        if not all(torch.isfinite(value).all() for value in model.state_dict().values()):
+            raise FloatingPointError("Cannot save non-finite change weights.")
         best = selection_score
         save_file({name: value.detach().cpu().contiguous() for name, value in model.state_dict().items()},
                   ARTIFACTS / "model.safetensors")
         (ARTIFACTS / "config.json").write_text(json.dumps({"artifact_version": "satquery-pair-v2",
             "architecture": "shared_resnet18_gru_answer_mask", "mask_supervision": "SECOND changed semantic labels",
-            "config": asdict(CFG), "word_vocab": word_vocab, "answer_vocab": answer_vocab,
+            "config": asdict(CFG), "warm_start": warm_start, "word_vocab": word_vocab, "answer_vocab": answer_vocab,
             "best_metrics": metrics}, indent=2), encoding="utf-8")
     torch.save({"epoch": epoch + 1, "best": best, "history": history,
+                "config": asdict(CFG), "warm_start": warm_start,
                 "model": model.state_dict(), "optimizer": optimizer.state_dict()}, training_state)
 
 (ARTIFACTS / "training_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
@@ -554,7 +659,9 @@ model.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
 validation_predictions = ARTIFACTS / "validation_predictions.jsonl"
 validation_metrics = evaluate(validation_loader, "validation", validation_predictions)
 test_predictions = ARTIFACTS / "test_predictions.jsonl"
-test_metrics = evaluate(test_loader, "test", test_predictions) if test_loader else None
+validation_ready = (validation_metrics["answer_accuracy"] >= (CFG.release_minimum_answer_accuracy or 0.60)
+                    and validation_metrics["mask_iou"] >= (CFG.release_minimum_mask_iou or 0.40))
+test_metrics = evaluate(test_loader, "test", test_predictions) if test_loader and validation_ready else None
 (ARTIFACTS / "evaluation_summary.json").write_text(
     json.dumps({"validation": validation_metrics, "test": test_metrics}, indent=2),
     encoding="utf-8",
@@ -562,7 +669,7 @@ test_metrics = evaluate(test_loader, "test", test_predictions) if test_loader el
 print(json.dumps({"validation": validation_metrics, "test": test_metrics}, indent=2))
 
 # Fresh architecture/weight reload, without downloading a second pretrained backbone.
-reloaded = ChangeExpert(len(word_vocab), len(answer_vocab), pretrained=False).cuda().eval()
+reloaded = ChangeExpert(len(word_vocab), len(answer_vocab), pretrained=False, decoder_version=CFG.decoder_version).cuda().eval()
 reloaded.load_state_dict(load_file(ARTIFACTS / "model.safetensors"), strict=True)
 reload_batch = next(iter(validation_loader))
 with torch.inference_mode():
@@ -618,7 +725,7 @@ gate = {"weights": (ARTIFACTS / "model.safetensors").is_file(),
         "raw_validation_predictions": validation_predictions.is_file(),
         "release_thresholds_declared": thresholds_declared,
         "validation_gate_passed": validation_passed,
-        "untouched_test_run_completed": test_metrics is not None,
+        "test_run_completed": test_metrics is not None,
         "test_gate_passed": test_passed,
         "paid_endpoint_created": False}
 print(json.dumps(gate, indent=2))

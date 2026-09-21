@@ -5,8 +5,11 @@ from torch.nn import functional as F
 from torchvision.models import resnet18, ResNet18_Weights
 
 class ChangeExpert(torch.nn.Module):
-    def __init__(self, vocabulary_size, answer_classes, pretrained=True):
+    def __init__(self, vocabulary_size, answer_classes, pretrained=True, decoder_version="legacy"):
         super().__init__()
+        if decoder_version not in {"legacy", "multiscale-r2"}:
+            raise ValueError("Unsupported change decoder version")
+        self.decoder_version = decoder_version
         encoder = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1 if pretrained else None)
         self.stem = torch.nn.Sequential(encoder.conv1, encoder.bn1, encoder.relu, encoder.maxpool,
             encoder.layer1, encoder.layer2, encoder.layer3, encoder.layer4)
@@ -19,29 +22,63 @@ class ChangeExpert(torch.nn.Module):
             torch.nn.Dropout(0.2), torch.nn.Linear(512, answer_classes))
         self.mask_head = torch.nn.Sequential(torch.nn.Conv2d(256, 128, 3, padding=1),
             torch.nn.GELU(), torch.nn.Conv2d(128, 1, 1))
+        if decoder_version == "multiscale-r2":
+            self.laterals = torch.nn.ModuleList([
+                torch.nn.Sequential(torch.nn.Conv2d(channels * 4, 64, 1),
+                    torch.nn.GroupNorm(8, 64), torch.nn.GELU())
+                for channels in (64, 128, 256)])
+            self.detail_head = torch.nn.Sequential(torch.nn.Conv2d(256 + 192, 128, 3, padding=1),
+                torch.nn.GroupNorm(8, 128), torch.nn.GELU(), torch.nn.Conv2d(128, 1, 1))
 
-    def forward(self, time_a, time_b, tokens):
-        feature_a, feature_b = self.stem(time_a), self.stem(time_b)
+    def encode_pair(self, time_a, time_b):
+        feature_a, feature_b = time_a, time_b
+        details = []
+        for index, layer in enumerate(self.stem):
+            feature_a, feature_b = layer(feature_a), layer(feature_b)
+            if self.decoder_version == "multiscale-r2" and index in (4, 5, 6):
+                joined = torch.cat([feature_a, feature_b, (feature_a-feature_b).abs(), feature_a*feature_b], 1)
+                details.append(self.laterals[index - 4](joined))
         fused = self.fuse(torch.cat([feature_a, feature_b, (feature_a-feature_b).abs(), feature_a*feature_b], 1))
         visual = F.adaptive_avg_pool2d(fused, 1).flatten(1)
+        mask = self.mask_head(fused)
+        if details:
+            size = details[0].shape[-2:]
+            features = [F.interpolate(x, size=size, mode="bilinear", align_corners=False) for x in [fused, *details]]
+            mask = F.interpolate(mask, size=size, mode="bilinear", align_corners=False) + self.detail_head(torch.cat(features, 1))
+        return visual, F.interpolate(mask, size=time_a.shape[-2:], mode="bilinear", align_corners=False)
+
+    def answer_from_visual(self, visual, tokens):
         _, hidden = self.question(self.embedding(tokens))
         question = torch.cat([hidden[-2], hidden[-1]], 1)
-        answer = self.answer_head(torch.cat([visual, question], 1))
-        mask = F.interpolate(self.mask_head(fused), size=time_a.shape[-2:], mode="bilinear", align_corners=False)
-        return answer, mask
+        return self.answer_head(torch.cat([visual, question], 1))
+
+    def forward(self, time_a, time_b, tokens):
+        visual, mask = self.encode_pair(time_a, time_b)
+        return self.answer_from_visual(visual, tokens), mask
 
 
 class FusionExpert(torch.nn.Module):
     """TerraMind token head trained with real per-pixel flood labels."""
 
     def __init__(
-        self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224
+        self, backbone, embedding_dim: int, num_classes: int, image_size: int = 224,
+        decoder_version: str = "legacy"
     ):
         super().__init__()
         self.backbone = backbone
+        if decoder_version not in {"legacy", "conv-r2"}:
+            raise ValueError("Unsupported fusion decoder version")
+        self.decoder_version = decoder_version
         self.norm = torch.nn.LayerNorm(embedding_dim)
         self.segmenter = torch.nn.Linear(embedding_dim, num_classes)
         self.num_classes, self.image_size = num_classes, image_size
+        if decoder_version == "conv-r2":
+            self.refine = torch.nn.Sequential(
+                torch.nn.Conv2d(embedding_dim, 128, 3, padding=1), torch.nn.GroupNorm(8, 128), torch.nn.GELU(),
+                torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                torch.nn.Conv2d(128, 64, 3, padding=1), torch.nn.GroupNorm(8, 64), torch.nn.GELU(),
+                torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                torch.nn.Conv2d(64, num_classes, 3, padding=1))
 
     def forward(self, *, s2=None, s1=None):
         inputs = {}
@@ -67,6 +104,10 @@ class FusionExpert(torch.nn.Module):
             .transpose(1, 2)
             .reshape(tokens.shape[0], self.num_classes, side, side)
         )
+        if self.decoder_version == "conv-r2":
+            grid = self.norm(tokens).transpose(1, 2).reshape(tokens.shape[0], -1, side, side)
+            detail = self.refine(grid)
+            logits = F.interpolate(logits, size=detail.shape[-2:], mode="bilinear", align_corners=False) + detail
         return F.interpolate(
             logits,
             (self.image_size, self.image_size),

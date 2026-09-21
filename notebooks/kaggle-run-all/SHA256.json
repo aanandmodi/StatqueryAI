@@ -1,8 +1,8 @@
 {
   "01_Qwen_Validation_and_Scorecard.ipynb": "a9d12c8d11adc6a9d8de9b9f1c91db4c5fa83a4d65827dddaaa179de56f6c487",
-  "02_Train_Vegetation_Water_Masks.ipynb": "98bbed9895fbb532e05fb3a7be6c00793245dc1244e57fec879f81cbeddd9abd",
-  "03_Train_Temporal_Change.ipynb": "bf4b2d2a20cf1fe92aa8124079dd76e192687865963ca1ce294056d88acea7f3",
-  "04_Train_Optical_SAR_Flood_Masks.ipynb": "61ab505534404f713f2f6b106c32656b974e4c7e12fc66f2b63fb0a772b41a82",
+  "02_Train_Vegetation_Water_Masks.ipynb": "331532a9a9aa85c8d4ae645848df285116949b49dab9e6f1f186e163d662458a",
+  "03_Train_Temporal_Change.ipynb": "0ad29a4880b3c8726438d676bb5e80338226c8c191fae021f019628dcbacea6c",
+  "04_Train_Optical_SAR_Flood_Masks.ipynb": "2554c45d261c6580c4f7316f8d9a682c63497fc785a56274d9b02d8240cbaffa",
   "05_Qwen_Final_Test.ipynb": "6e7ffae59e8cfd3563638a884461e466f9a30dbeac8db22a8b69416c377fb21d",
-  "06_All_Models_Ngrok_Server.ipynb": "64a05e0a8191a86d90626caa389871f16b9973e47a0f404f48743e44e572326a"
+  "06_All_Models_Ngrok_Server.ipynb": "c838e1421f4cd6964e9e4dfb64c6a5e91195be7da0ff97dcb8d197496abcc6e4"
 }

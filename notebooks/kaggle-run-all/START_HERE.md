@@ -1,5 +1,27 @@
 # SatQuery — numbered Kaggle Run All pack
 
+## R2 recovery — use this with the completed 01/05 evidence
+
+**Do not rerun 01 or 05.** Their frozen Qwen evidence is already preserved. Re-run only 02 → 03 → 04,
+in separate fresh GPU sessions, and preserve new exports in `upgrade/r2/` without replacing originals.
+Read [the revision guide](TRAINING_R2.md) for the recorded failures and changes.
+
+- **02:** optionally attach exactly one previous extracted `02_segmentation_inference` output via
+  Add Input. The notebook verifies its weights, reuses them, and starts a new optimizer/schedule.
+  Without this input it trains from the pinned encoder. Training data still downloads automatically.
+- **03:** optionally attach exactly one previous extracted `03_change_inference` output. Its finite,
+  hash-checked weights initialize the existing layers; the new multiscale decoder trains from scratch.
+  Without this input the whole specialist trains afresh from the ImageNet encoder.
+- **04:** attach **no previous failed checkpoint**. The old NaN export is invalid. Start fresh;
+  setup may request **Restart Kernel**, then Run All again. This is a deliberate dependency boundary.
+- **06:** import the **new** notebook after all three revised exports actually pass. Attach exactly
+  one passing export per specialist. No 01/05 ZIP is required by 06. Changed decoder versions are
+  loaded explicitly; an old 06 notebook cannot load the new architectures.
+
+R2 keeps all release thresholds unchanged. A completed run can still fail a quality gate. Tests
+are evaluated only after validation gates pass; previous public test results have already been
+seen, so these are confirmation runs, not a new untouched benchmark. No pass is guaranteed.
+
 Use one new Kaggle notebook/session for each numbered file. The training notebooks and evaluation
 notebooks do not run your website. The last notebook serves your models to the local website.
 All Python code needed by each notebook is embedded; no Git clone or manual code-cell patching is needed.

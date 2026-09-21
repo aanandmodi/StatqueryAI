@@ -3,6 +3,10 @@
 **Kaggle execution pack:** [six numbered notebooks and complete upload/run instructions](notebooks/kaggle-run-all/START_HERE.md).
 The final notebook includes quality, planning, trained pair loading and the attended ngrok server.
 
+**Training recovery R2 (2026-09-21):** [current results and revised 02–04 run instructions](docs/TRAINING_R2.md).
+Notebooks 01 and 05 are completed Qwen evaluations. Original 02/03 missed quality gates; 04 had
+NaN weights and must not be served. R2 fixes are ready for new Kaggle runs, **not yet passed model releases**.
+
 SatQuery is a local-first, auditable remote-sensing assistant for satellite-image questions,
 captions, visual grounding, bi-temporal change analysis, and optical/SAR paired analysis. The
 released neural path uses the public

@@ -6,6 +6,7 @@ import ast
 import copy
 import hashlib
 import json
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -197,7 +198,8 @@ def build_training():
         intro(
             "02 — Train your vegetation/water/land-cover mask model",
             "GPU T4/P100, Internet On, then Run All. Official LoveDA data downloads automatically. "
-            "Memory-safe profile: 384px crops, batch 1, gradient accumulation 8, streaming validation. "
+            "R2: scale-matched 384px augmentation, batch 1, accumulation 8, streaming validation, balanced gate selection. "
+            "Optionally attach exactly one extracted previous 02 output for checked weight-only warm start. "
             "70% of official training data is used; validation is preserved. Save Version with outputs "
             "when finished. Final server notebook 06 loads this model if its validation gate passes.",
         ),
@@ -220,7 +222,9 @@ def build_training():
             "automatically from a pinned PerASCD research mirror (3.78 GB archive; allow 10 GiB free). "
             "Files are verified against the archive SHA256 and original CDVQA split filenames. Prototype acceptance targets are "
             "answer accuracy ≥0.60 and mask IoU ≥0.40, declared before this run. They are project targets, "
-            "not benchmark guarantees. Test is run after validation; failing artifacts cannot enter notebook 06.",
+            "not benchmark guarantees. R2 adds a multiscale mask decoder, pair-balanced training and cached visual evaluation. "
+            "Optionally attach exactly one extracted previous 03 output to retain its learned answer weights. "
+            "Test runs only after validation passes; failing artifacts cannot enter notebook 06.",
         ),
     )
     substitute(change, "run_test_once: bool = False", "run_test_once: bool = True")
@@ -238,6 +242,7 @@ def build_training():
         code(SUPPORT),
         code(
             "(ARTIFACTS / 'release_gate.json').write_text(json.dumps(gate, indent=2))\n"
+            "(ARTIFACTS / 'sha256_manifest.json').write_text(json.dumps({p.name: file_sha256(p) for p in ARTIFACTS.iterdir() if p.is_file() and p.name not in {'training_state.pt', 'sha256_manifest.json'}}, indent=2))\n"
             "export_inference_zip(ARTIFACTS, '/kaggle/working/03_change_inference.zip')\n"
             "print('CANDIDATE PASSED' if gate['validation_gate_passed'] and gate['test_gate_passed'] "
             "else 'NEEDS IMPROVEMENT — review metrics before a new experiment; do not lower targets to pass.')\n"
@@ -253,7 +258,8 @@ def build_training():
             "GPU T4/P100 and Internet On. Run setup first; if it prints SETUP COMPLETE — RESTART KERNEL, "
             "restart the Python kernel without ending the session, then Run All. The pinned numeric stack "
             "and early import preflight prevent continuing with stale NumPy binaries. "
-            "This edition automatically downloads only the "
+            "R2 uses FP32, a convolutional decoder, workers=0, finite-loss/gradient checks and fresh outputs. "
+            "Do NOT attach/resume the old NaN checkpoint. This edition automatically downloads only the "
             "official hand-labelled Sen1Floods11 S1/S2 triplets. The project target is flood IoU ≥0.50 "
             "on validation and test, with fused validation at least as good as either modality alone. "
             "It covers Sentinel flood/water segmentation, not universal land cover or Cartosat/RISAT transfer.",
@@ -279,6 +285,7 @@ def build_training():
         code(
             "shutil.copy2(Path(CFG.dataset_root) / 'source_objects.json', ARTIFACTS / 'source_objects.json')\n"
             "(ARTIFACTS / 'release_gate.json').write_text(json.dumps(gate, indent=2))\n"
+            "(ARTIFACTS / 'sha256_manifest.json').write_text(json.dumps({p.name: file_sha256(p) for p in ARTIFACTS.iterdir() if p.is_file() and p.name not in {'training_state.pt', 'sha256_manifest.json'}}, indent=2))\n"
             "export_inference_zip(ARTIFACTS, '/kaggle/working/04_fusion_inference.zip')\n"
             "print('CANDIDATE PASSED' if gate['validation_gate_passed'] and gate['test_gate_passed'] "
             "else 'NEEDS IMPROVEMENT — retain metrics and review errors before another experiment.')\n"
@@ -316,7 +323,7 @@ def build_server():
     substitute(
         nb,
         '"huggingface-hub==0.34.4",',
-        '"huggingface-hub==0.36.2",\n    "terratorch>=1.2.5,<2",\n    "setuptools<81",',
+        '"huggingface-hub==0.36.2",\n    "terratorch==1.2.13",\n    "torchgeo==0.9.0",\n    "numpy==2.2.6",\n    "scipy==1.15.3",\n    "albumentations==2.0.8",\n    "albucore==0.0.24",\n    "opencv-python-headless==4.11.0.86",\n    "diffusers==0.35.1",\n    "tokenizers==0.22.1",\n    "setuptools<81",',
     )
     optional = nbformat.read(
         ROOT / "notebooks/SatQuery_Optional_Paired_Runtime.ipynb", as_version=4
@@ -369,6 +376,7 @@ def main():
     build_evaluations()
     build_training()
     build_server()
+    shutil.copy2(ROOT / "docs/TRAINING_R2.md", DEST / "TRAINING_R2.md")
     outputs = sorted(DEST.glob("*.ipynb"))
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in outputs}
     (DEST / "SHA256.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
@@ -377,6 +385,12 @@ def main():
         for path in sorted(DEST.iterdir()):
             if path.is_file():
                 archive.write(path, path.name)
+    # Keep the already tracked extracted copy consistent with the canonical pack.
+    mirror = ROOT / "notebooks/SatQuery_Kaggle_Run_All_Pack"
+    if mirror.is_dir():
+        for path in DEST.iterdir():
+            if path.is_file():
+                shutil.copy2(path, mirror / path.name)
     print(f"Validated and packaged {len(outputs)} standalone notebooks: {zip_path}")
 
 

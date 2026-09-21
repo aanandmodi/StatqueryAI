@@ -1,5 +1,20 @@
 # Project progress
 
+## R2 release recovery — 2026-09-21
+
+- Initial checkpoint published as `c9d61fd`. GitHub rejected the previous unpushed history because
+  temporal prediction JSONL exceeded 100 MB. Local backup branch
+  `backup/pre-large-evidence-publish-680bc5b` preserves that history; all local evidence remains intact.
+- Revised 02/03/04 sources target the measured gaps; thresholds and failed original evidence are
+  preserved. 02 addresses scale mismatch and balanced checkpoint selection; 03 adds a multiscale
+  mask decoder and balanced training; 04 adds finite-data/loss/gradient guards and FP32 recovery.
+- Updated paired runtime supports explicit legacy/R2 decoders. No new weights have been trained,
+  no failed checkpoint promoted, and no new release accuracy is claimed.
+- See [TRAINING_R2.md](TRAINING_R2.md) for exact notebook order, optional checked warm starts,
+  output preservation, unchanged gates, and the distinction between code tests and model quality.
+- Verification: 290 backend + 13 ML tests and four CPU numerical/gradient/reload tests passed;
+  notebook schemas/code cells validated. Local re-scoring reproduces 05's Qwen test aggregates.
+
 ## Recorded cloud training and final Qwen test — 2026-09-21
 
 - Qwen notebook 05 completed: 200 held-out examples, including 100 VQA, 50 grounding and 50

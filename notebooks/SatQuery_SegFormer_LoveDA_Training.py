@@ -22,7 +22,7 @@
 # It does not pretend that additional Qwen VQA examples can teach exact pixel boundaries.
 #
 # The default free-T4 profile uses 70% of LoveDA's official **training split**, stratified by
-# urban/rural domain. The official validation split remains completely untouched. Increase the
+# urban/rural domain. Validation is excluded from training and used for checkpoint selection. Increase the
 # fraction only after the default run completes; never mix validation/test images into training.
 #
 # LoveDA is academic/non-commercial and derived from Google Earth imagery. It is suitable for an
@@ -36,6 +36,7 @@
 import subprocess
 import sys
 import os
+from importlib import metadata
 
 # Set before importing torch: use one GPU, not notebook DataParallel on two T4s.
 if "torch" in sys.modules and sys.modules["torch"].cuda.is_initialized():
@@ -44,6 +45,10 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 PACKAGES = [
+    "numpy==2.2.6",
+    "scipy==1.15.3",
+    "opencv-python-headless==4.11.0.86",
+    "albucore==0.0.24",
     "transformers==4.57.1",
     "accelerate==1.7.0",
     "huggingface_hub==0.36.2",
@@ -53,8 +58,23 @@ PACKAGES = [
     "requests>=2.32,<3",
     "tqdm>=4.66,<5",
 ]
+def installed_training_versions():
+    return {d.metadata["Name"].lower().replace("_", "-"): d.version for d in metadata.distributions() if d.metadata["Name"]}
+
+before_install = installed_training_versions()
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--upgrade", *PACKAGES])
-print("Dependencies installed. Restart once only if the next cell imports cached old modules.")
+after_install = installed_training_versions()
+numeric_probe = "import numpy, numpy.testing; from scipy import special; import albumentations; from transformers import SegformerForSemanticSegmentation"
+probe = subprocess.run([sys.executable, "-c", numeric_probe], capture_output=True, text=True)
+if probe.returncode:
+    raise RuntimeError("Fresh-process segmentation imports failed:\n" + probe.stderr[-6000:])
+if any(before_install.get(name) != after_install.get(name) for name in ("numpy", "scipy", "transformers", "huggingface-hub", "albumentations")):
+    raise SystemExit("SETUP COMPLETE — RESTART KERNEL (keep session files), then Run All again. Do not hot-reload NumPy.")
+try:
+    exec(numeric_probe)
+except Exception as exc:
+    raise RuntimeError("Disk imports pass but kernel is stale. Restart Kernel, then Run All.") from exc
+print("PASS: segmentation numeric/import environment is ready.")
 
 # %% [markdown]
 # ## 1. Configuration — edit only this cell
@@ -73,7 +93,8 @@ class Config:
     train_fraction: float = 0.70
     seed: int = 42
     crop_size: int = 384
-    epochs: int = 12
+    epochs: int = 20
+    training_revision: str = "r2-scale-matched-finite"
     train_batch_size: int = 1
     eval_batch_size: int = 1
     gradient_accumulation_steps: int = 8
@@ -88,9 +109,9 @@ class Config:
 CFG = Config()
 assert 0 < CFG.train_fraction <= 1
 ROOT = Path(
-    "/kaggle/working/satquery-segmentation"
+    "/kaggle/working/satquery-segmentation-r2"
     if Path("/kaggle/working").exists()
-    else "/content/satquery-segmentation"
+    else "/content/satquery-segmentation-r2"
 )
 DATA_DIR = ROOT / "data"
 OUTPUT_DIR = ROOT / "best-model"
@@ -273,7 +294,11 @@ ID2LABEL = {index: label for index, label in enumerate(LABELS)}
 LABEL2ID = {label: index for index, label in ID2LABEL.items()}
 
 train_transform = A.Compose([
-    A.PadIfNeeded(min_height=CFG.crop_size, min_width=CFG.crop_size),
+    # Match validation's full-scene scale; the old native 384px crop trained at
+    # ~2.7x the evaluation magnification. Random rescaling supplies nearby scales.
+    A.Resize(height=CFG.crop_size, width=CFG.crop_size),
+    A.RandomScale(scale_limit=(-0.15, 0.35), p=0.75),
+    A.PadIfNeeded(min_height=CFG.crop_size, min_width=CFG.crop_size, border_mode=0, fill=0, fill_mask=0),
     A.RandomCrop(height=CFG.crop_size, width=CFG.crop_size),
     A.HorizontalFlip(p=0.5),
     A.VerticalFlip(p=0.5),
@@ -360,6 +385,32 @@ model = SegformerForSemanticSegmentation.from_pretrained(
 )
 weight_tensor = torch.tensor(class_weights, dtype=torch.float32)
 
+# Optional warm start: attach the preserved 02 output (extracted, not ZIP-only).
+# Load ONLY weights; do not import its optimizer, failed gate or old training schedule.
+warm_candidates = [p.parent for p in Path("/kaggle/input").rglob("training_manifest.json")
+                   if (p.parent / "model.safetensors").is_file()]
+if len(warm_candidates) > 1:
+    raise RuntimeError("Attach at most one previous 02 output for warm start.")
+warm_start = None
+if warm_candidates:
+    from safetensors.torch import load_file
+    old_root = warm_candidates[0]
+    old_manifest = json.loads((old_root / "training_manifest.json").read_text())
+    old_hashes = json.loads((old_root / "sha256_manifest.json").read_text())
+    weight_sha = hashlib.sha256((old_root / "model.safetensors").read_bytes()).hexdigest()
+    if old_hashes.get("model.safetensors") != weight_sha:
+        raise RuntimeError("Previous 02 checkpoint checksum mismatch.")
+    old_config = json.loads((old_root / "config.json").read_text())
+    if {int(k): v for k, v in old_config["id2label"].items()} != ID2LABEL:
+        raise RuntimeError("Previous 02 label order differs; refuse unsafe warm start.")
+    state = load_file(old_root / "model.safetensors")
+    if not all(torch.isfinite(t).all() for t in state.values()):
+        raise RuntimeError("Previous 02 contains non-finite weights.")
+    model.load_state_dict(state, strict=True)
+    warm_start = {"weights_sha256": weight_sha, "source": str(old_root)}
+    del state
+print({"warm_start": warm_start, "revision": CFG.training_revision})
+
 
 class DiceCETrainer(Trainer):
     def __init__(self, *args, **kwargs):
@@ -368,13 +419,27 @@ class DiceCETrainer(Trainer):
         # by gradient_accumulation_steps rather than treating it as pre-normalized.
         self.model_accepts_loss_kwargs = False
 
+    def create_optimizer(self):
+        if self.optimizer is None:
+            encoder, decoder = [], []
+            for name, parameter in self.model.named_parameters():
+                if parameter.requires_grad:
+                    (decoder if name.startswith("decode_head.") else encoder).append(parameter)
+            self.optimizer = torch.optim.AdamW([
+                {"params": encoder, "lr": self.args.learning_rate},
+                {"params": decoder, "lr": self.args.learning_rate * 5},
+            ], weight_decay=self.args.weight_decay)
+        return self.optimizer
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
         inputs.pop("source_index", None)
         outputs = model(**inputs)
         logits = F.interpolate(
             outputs.logits, size=labels.shape[-2:], mode="bilinear", align_corners=False
-        )
+        ).float()
+        if not torch.isfinite(logits).all():
+            raise FloatingPointError("Non-finite segmentation logits; no release is permitted.")
         valid = labels != 255
         if not valid.any():
             loss = logits.sum() * 0.0
@@ -394,6 +459,8 @@ class DiceCETrainer(Trainer):
                 dice_terms.append((2 * intersection + 1) / (denominator + 1))
         dice_loss = 1 - torch.stack(dice_terms).mean()
         loss = ce + CFG.dice_weight * dice_loss
+        if not torch.isfinite(loss):
+            raise FloatingPointError("Non-finite segmentation loss; preserve diagnostics, stop training.")
         return (loss, outputs) if return_outputs else loss
 
 
@@ -440,6 +507,10 @@ def metrics_from_confusion(confusion) -> dict[str, float]:
     metrics["mean_iou"] = float(np.mean(ious)) if ious else 0.0
     metrics["mean_dice"] = float(np.mean(dices)) if dices else 0.0
     metrics["pixel_accuracy"] = float(np.trace(confusion) / max(1, confusion.sum()))
+    # Checkpoint selection balances all gates; accuracy thresholds are unchanged.
+    if all(f"iou_{name}" in metrics for name in ("water", "forest", "agricultural")):
+        values = [metrics["mean_iou"] / 0.45] + [metrics[f"iou_{name}"] / 0.35 for name in ("water", "forest", "agricultural")]
+        metrics["release_balance"] = min(values) if all(np.isfinite(values)) else 0.0
     return metrics
 
 
@@ -473,13 +544,16 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=CFG.eval_batch_size,
     gradient_accumulation_steps=CFG.gradient_accumulation_steps,
     bf16=torch.cuda.is_bf16_supported(),
-    fp16=not torch.cuda.is_bf16_supported(),
+    fp16=False,  # T4/P100 use FP32; avoid silent overflow in the new quality run.
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.08,
+    max_grad_norm=1.0,
     eval_strategy="epoch",
     save_strategy="epoch",
     logging_steps=25,
     save_total_limit=2,
     load_best_model_at_end=True,
-    metric_for_best_model="mean_iou",
+    metric_for_best_model="release_balance",
     greater_is_better=True,
     dataloader_num_workers=CFG.num_workers,
     dataloader_pin_memory=False,
@@ -501,7 +575,7 @@ trainer = DiceCETrainer(
 )
 checkpoint_root = Path(training_args.output_dir)
 checkpoint_root.mkdir(parents=True, exist_ok=True)
-run_config = {"config": asdict(CFG), "selection_sha256": selection_sha256, "profile": "streaming-v2"}
+run_config = {"config": asdict(CFG), "selection_sha256": selection_sha256, "profile": "streaming-v2", "warm_start": warm_start}
 run_config_path = checkpoint_root / "resume_config.json"
 if any(checkpoint_root.glob("checkpoint-*")):
     if not run_config_path.exists() or json.loads(run_config_path.read_text()) != run_config:
@@ -513,7 +587,7 @@ checkpoints = sorted(checkpoint_root.glob("checkpoint-*"), key=lambda path: int(
 from torch.utils.data import Subset
 print("Preflight: streaming evaluation on two validation scenes")
 trainer.evaluate(eval_dataset=Subset(validation_dataset, range(min(2, len(validation_dataset)))), metric_key_prefix="preflight")
-trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=3))
+trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=6))
 trainer.train(resume_from_checkpoint=str(checkpoints[-1]) if checkpoints else None)
 final_metrics = trainer.evaluate()
 print(json.dumps(final_metrics, indent=2, sort_keys=True))
@@ -562,7 +636,7 @@ for position in tqdm(range(len(validation_dataset)), desc="Validation evidence")
     item = validation_dataset[position]
     pixel_values = item["pixel_values"].unsqueeze(0).to("cuda")
     reference = item["labels"].numpy()
-    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16 if training_args.bf16 else torch.float16):
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=training_args.bf16):
         logits = trainer.model(pixel_values=pixel_values).logits
         logits = F.interpolate(
             logits, size=reference.shape, mode="bilinear", align_corners=False
@@ -654,6 +728,8 @@ release_checks = {
     },
 }
 release_candidate = all(release_checks.values())
+if not all(torch.isfinite(value).all() for value in trainer.model.state_dict().values()):
+    raise FloatingPointError("Cannot export non-finite weights.")
 trainer.save_model(str(OUTPUT_DIR))
 processor.save_pretrained(OUTPUT_DIR)
 
@@ -679,6 +755,7 @@ manifest = {
         "gpu": torch.cuda.get_device_name(0),
     },
     "config": asdict(CFG),
+    "warm_start": warm_start,
 }
 (OUTPUT_DIR / "training_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -709,9 +786,10 @@ smoke_image = np.asarray(Image.fromarray(smoke["image"].permute(1, 2, 0).byte().
     (CFG.crop_size, CFG.crop_size), Image.Resampling.BILINEAR
 ))
 smoke_batch = reloaded_processor(images=smoke_image, return_tensors="pt").to("cuda")
-with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16 if training_args.bf16 else torch.float16):
+with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=training_args.bf16):
     smoke_logits = reloaded(**smoke_batch).logits
 assert smoke_logits.shape[1] == len(LABELS)
+assert torch.isfinite(smoke_logits).all(), "Fresh reload returned non-finite logits"
 print({"PASS": "fresh safetensors reload", "logits": list(smoke_logits.shape)})
 
 # %% [markdown]
