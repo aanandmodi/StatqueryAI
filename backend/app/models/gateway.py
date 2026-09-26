@@ -198,6 +198,7 @@ class HttpSpecialistGateway:
                 details={"task": step.task.value},
             )
         handles = []
+        started = time.perf_counter()
         try:
             files = []
             for asset in assets:
@@ -249,12 +250,23 @@ class HttpSpecialistGateway:
             )
             response.raise_for_status()
             output = SpecialistOutput.model_validate(response.json())
+            if output.task != step.task:
+                raise ValueError("Specialist returned a different task")
+            output.facts.append({"name": "upstream_request_ms", "value": round((time.perf_counter() - started) * 1000)})
             self._versions[step.task.value] = output.model_version
             return output
         except (httpx.HTTPError, ValueError) as exc:
             raise ModelUnavailableError(
                 "Specialist model service failed",
-                details={"task": step.task.value, "reason": str(exc)},
+                # Never expose exception strings: HTTP/Pydantic errors may include tokens,
+                # uploaded content, endpoint URLs or the complete response body.
+                details={
+                    "task": step.task.value,
+                    "failure_type": type(exc).__name__,
+                    "http_status": exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000),
+                    "stage": "response_validation" if isinstance(exc, ValueError) else "transport",
+                },
             ) from exc
         finally:
             for handle in handles:
@@ -666,6 +678,7 @@ class FallbackPairSpecialistGateway:
         method: str,
         *,
         fallback_reason: str | None = None,
+        failure_details: dict | None = None,
     ) -> SpecialistOutput:
         facts = [item for item in output.facts if item.get("name") != "pair_execution_method"]
         facts.append({"name": "pair_execution_method", "value": method})
@@ -678,6 +691,7 @@ class FallbackPairSpecialistGateway:
             evidence.append(item.model_copy(update={"geometry": geometry}))
         warnings = list(output.warnings)
         if fallback_reason:
+            facts.append({"name": "learned_specialist_failure", "value": failure_details or {}})
             warnings.append(
                 "Learned pair specialist was unavailable; the request completed with the "
                 f"audited analytical fallback. Reason: {fallback_reason}"
@@ -700,13 +714,20 @@ class FallbackPairSpecialistGateway:
             )
         try:
             output = await self.learned_gateway.infer(step, assets, query, context)
-            return self._label(output, self.LEARNED_METHODS[step.task])
+            return self._label(output, "quality-abstention" if output.model_version.endswith(":abstained") else self.LEARNED_METHODS[step.task])
         except ModelUnavailableError as exc:
             output = await self.analytical_gateway.infer(step, assets, query, context)
             return self._label(
                 output,
                 self.FALLBACK_METHODS[step.task],
-                fallback_reason=exc.message,
+                fallback_reason=(
+                    f"{exc.message} [{exc.details.get('failure_type', 'unavailable')}; "
+                    f"HTTP {exc.details.get('http_status', 'n/a')}; "
+                    f"stage={exc.details.get('stage', 'unknown')}]"
+                ),
+                failure_details={key: exc.details[key] for key in (
+                    "task", "failure_type", "http_status", "elapsed_ms", "stage"
+                ) if key in exc.details},
             )
 
     async def health(self) -> bool:

@@ -360,6 +360,35 @@ def spectral_water_output(output, step, assets, asset_store):
     )
 
 
+def fusion_water_crosscheck(output, step, assets, asset_store):
+    """Compare, never merge, learned water with sensor-qualified NDWI. Not an accuracy test."""
+    if step.task != TaskType.OPTICAL_SAR_FUSION or not output.model_version.startswith("satquery-pair-"):
+        return output
+    optical = [a for a in assets if a.modality in {Modality.OPTICAL, Modality.MULTISPECTRAL}]
+    masks = [e for e in output.evidence if e.type == "mask"]
+    if len(optical) != 1 or len(masks) != 1:
+        return output
+    probe_step = step.model_copy(update={"task": TaskType.GROUNDING, "permitted_params": {"targets": ["water"]}})
+    blank = output.model_copy(update={"evidence": [], "facts": [], "warnings": []})
+    probe = spectral_water_output(blank, probe_step, optical, asset_store)
+    if not probe.evidence:
+        return output.model_copy(update={"facts": [*output.facts, {"name": "water_crosscheck", "value": "unavailable: verified green/NIR required"}]})
+    learned, reference = decode_mask(masks[0].geometry), decode_mask(probe.evidence[0].geometry)
+    if learned.shape != reference.shape:
+        reference = np.asarray(Image.fromarray(reference).resize(learned.shape[::-1], Image.Resampling.NEAREST))
+    intersection, union = int((learned & reference).sum()), int((learned | reference).sum())
+    agreement = intersection / union if union else None
+    fact = {"name": "water_crosscheck", "value": {
+        "learned_selected_pixels": int(learned.sum()), "ndwi_selected_pixels": int(reference.sum()),
+        "mask_agreement_iou": agreement, "grid": list(learned.shape[::-1]),
+        "semantics": "Inter-method overlap, NOT labelled accuracy or correctness probability; masks were not merged.",
+    }}
+    warnings = [*output.warnings]
+    if agreement is not None and agreement < 0.5:
+        warnings.append("Learned water and optical NDWI disagree substantially. Review small water features, shadows and cloud; neither method is ground truth.")
+    return output.model_copy(update={"facts": [*output.facts, fact], "warnings": warnings})
+
+
 def materialize_masks(analysis_id, evidence, assets, asset_store, artifacts, api_prefix):
     """Recompute grid statistics and store masks; never follow a model-supplied URL/path."""
     result = []

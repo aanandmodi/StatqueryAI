@@ -72,6 +72,7 @@ type AnalysisRecord = {
       level: string;
       calibration_version: string;
       meaning: string;
+      correctness_probability?: number | null;
       factors?: Record<string, number>;
     };
     evidence?: Evidence[];
@@ -301,7 +302,9 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
                   <div><span className="eyebrow">Evidence-led output</span><h2>Intelligence brief</h2></div>
                   {record.result?.confidence && (
                     <span className={`confidence-chip level-${record.result.confidence.level}`}>
-                      {(record.result.confidence.score * 100).toFixed(0)} · {record.result.confidence.level}
+                      {record.result.confidence.correctness_probability == null
+                        ? 'Correctness probability unavailable'
+                        : `${(record.result.confidence.correctness_probability * 100).toFixed(0)}% calibrated`}
                     </span>
                   )}
                 </div>
@@ -348,7 +351,7 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
                     )}
                     {factorData.length > 0 && (
                       <article className="chart-card">
-                        <h3>Confidence factors</h3><p>Controller-returned integration factors</p>
+                        <h3>Quality diagnostics</h3><p>Uncalibrated integration factors—not correctness probabilities</p>
                         <ResponsiveContainer width="100%" height={230}>
                           <PieChart>
                             <Pie data={factorData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={82} paddingAngle={3} />

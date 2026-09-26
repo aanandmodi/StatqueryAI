@@ -115,8 +115,11 @@ def prepare_flood_data(destination):
     return root
 
 
-def find_trained_artifacts(input_root):
-    """Identify attached exports by content and verify the two files used to load weights."""
+def find_trained_artifacts(input_root, *, allow_experimental_segmentation=False):
+    """Verify weights AND the metadata that controls preprocessing/release decisions.
+
+    Checksums establish internal consistency, not independent authorship or model accuracy.
+    """
     candidates = {"segmentation": [], "change": [], "fusion": []}
     for path in Path(input_root).rglob("config.json"):
         root = path.parent
@@ -139,18 +142,24 @@ def find_trained_artifacts(input_root):
         if not manifest_path.is_file():
             raise ValueError(f"Missing hash manifest in {root}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        for name in ("model.safetensors", "config.json"):
-            if manifest.get(name) != file_sha256(root / name):
+        required = ["model.safetensors", "config.json"]
+        required += (["training_manifest.json", "preprocessor_config.json"]
+                     if role == "segmentation" else ["release_gate.json"])
+        for name in required:
+            if not (root / name).is_file() or manifest.get(name) != file_sha256(root / name):
                 raise ValueError(f"Checkpoint integrity failed: {root / name}")
         if role == "segmentation":
             report = json.loads(
                 (root / "training_manifest.json").read_text(encoding="utf-8")
             )
-            candidate = report.get("release_candidate", False)
-            if not candidate:
+            candidate = report.get("release_candidate") is True
+            if not candidate and not allow_experimental_segmentation:
                 raise ValueError(
                     "SegFormer validation gate failed. Review its metrics before serving."
                 )
+            if not candidate:
+                print("EXPERIMENTAL DEMO ONLY: SegFormer failed its release gate. "
+                      "Its masks must remain labelled unvalidated; no release flag is changed.")
         else:
             gate_path = root / "release_gate.json"
             gate = (
@@ -158,9 +167,7 @@ def find_trained_artifacts(input_root):
                 if gate_path.is_file()
                 else {}
             )
-            if not gate.get("validation_gate_passed") or not gate.get(
-                "test_gate_passed"
-            ):
+            if gate.get("validation_gate_passed") is not True or gate.get("test_gate_passed") is not True:
                 raise ValueError(
                     f"{role} needs passing validation/test gates from this numbered pack."
                 )

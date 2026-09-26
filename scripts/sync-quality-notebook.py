@@ -42,7 +42,7 @@ def main() -> None:
 
     live_source = (
         "# %% [markdown]\n"
-        "# # SatQuery live quality v4 upgrade\n"
+        "# # SatQuery live quality v6 upgrade (legacy filename retained)\n"
         "# Run the next cell in an existing Kaggle server session after section 6.\n"
         "# Stop active requests first. It adds a lightweight semantic segmentation model,\n"
         "# keeps Qwen/SAM as fallback, changes no trained adapter weights and creates no endpoint.\n\n"
@@ -68,7 +68,7 @@ def main() -> None:
         newline="\n",
     )
     print(
-        "PASS: synchronized quality v4, live patch and SegFormer training notebooks"
+        "PASS: synchronized quality v6, live patch and SegFormer training notebooks"
     )
 
 

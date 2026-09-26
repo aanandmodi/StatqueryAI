@@ -61,6 +61,19 @@ def audit_visual_narrative(output: SpecialistOutput) -> SpecialistOutput:
             "the original response remains available as unverified audit data."
         )
     retained = unique_retained
+    # A bounded contradiction screen, not a factuality model. Abstain rather than choose
+    # whichever side sounds more plausible; retain the original for the audit trail.
+    for feature in ("buildings?", "water", "roads?", "vegetation"):
+        negative = re.compile(rf"\b(?:no|without)\s+(?:visible\s+)?{feature}\b", re.I)
+        positive = re.compile(rf"\b(?:{feature})\b.{{0,45}}\b(?:visible|present|cluster|feature)\b|"
+                              rf"\b(?:cluster of|some|several)\s+{feature}\b", re.I)
+        if any(negative.search(s) for s in retained) and any(
+            positive.search(s) and not negative.search(s) for s in retained
+        ):
+            retained = [s for s in retained if not re.search(rf"\b{feature}\b", s, re.I)]
+            retained.append("Conflicting model statements were withheld; this feature requires visual verification.")
+            warnings.append("The narrative contains conflicting presence/absence claims; neither was accepted as fact.")
+            changed = True
     # A long response ending without punctuation commonly hits the generation budget.
     if len(original.split()) >= 70 and original.rstrip()[-1:] not in {".", "!", "?"}:
         warnings.append(

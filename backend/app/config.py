@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     space_max_new_tokens: int = 128
 
     max_upload_bytes: int = 1_073_741_824
+    # The bundled Kaggle service rejects >50 MiB per asset. Match that limit at upload,
+    # before storing a large raster or spending time on planning/inference.
+    model_service_max_upload_bytes: int = Field(default=50 * 1024 * 1024, gt=0, le=50 * 1024 * 1024)
     max_raster_pixels: int = 500_000_000
     max_raster_bands: int = 32
     max_query_chars: int = 2_000
@@ -77,6 +80,12 @@ class Settings(BaseSettings):
     api_key: SecretStr | None = None
     enable_docs: bool = True
     allow_benchmark_images: bool = True
+
+    @property
+    def effective_upload_limit_bytes(self) -> int:
+        if self.model_backend == "http" or self.pair_backend == "http":
+            return min(self.max_upload_bytes, self.model_service_max_upload_bytes)
+        return self.max_upload_bytes
 
     @field_validator("api_key", "model_service_token", "space_token", mode="before")
     @classmethod

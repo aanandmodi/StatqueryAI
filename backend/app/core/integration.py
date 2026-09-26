@@ -28,11 +28,9 @@ def integrate_outputs(
         asset.metadata.quality_score for asset in assets if asset.metadata is not None
     )
     evidence_coverage = min(1.0, len(evidence) / max(1, len(outputs)))
-    branch_agreement = (
-        1.0
-        if len(outputs) == 1
-        else max(0.0, 1.0 - (max(o.raw_score for o in outputs) - min(o.raw_score for o in outputs)))
-    )
+    # Similar softmax magnitudes do not establish agreement between different tasks.
+    # This is only an auditable completeness rubric, never estimated correctness.
+    branch_agreement = 0.0
     score = max(
         0.0,
         min(
@@ -55,9 +53,11 @@ def integrate_outputs(
             "Evidence-quality score only; a calibrated probability of correctness is unavailable."
         )
     else:
-        calibration_version = "specialist-calibration-v1"
+        score = min(score, 0.59)
+        calibration_version = "uncalibrated-aggregate"
         meaning = (
-            "Calibrated correctness estimate conditioned on the task and validation distribution."
+            "Specialists declared calibrated scores, but no calibration exists for this combined "
+            "report. The hand-weighted evidence-quality rubric is not a correctness probability."
         )
     level = "high" if score >= 0.8 else "medium" if score >= 0.6 else "low"
     confidence = Confidence(
@@ -68,7 +68,7 @@ def integrate_outputs(
             "specialist_score": raw_score,
             "input_quality": input_quality,
             "evidence_coverage": evidence_coverage,
-            "branch_agreement": branch_agreement,
+            "cross_task_agreement_not_measured": branch_agreement,
         },
         meaning=meaning,
     )

@@ -4,6 +4,8 @@
 # then run this cell. It does not restart training, create an endpoint, or extend the tunnel timer.
 # Requires the existing notebook's model, processor, helpers and FastAPI schemas.
 import base64
+import json
+from pathlib import Path
 from contextlib import nullcontext
 
 from transformers import (
@@ -13,16 +15,36 @@ from transformers import (
     SegformerForSemanticSegmentation,
 )
 
-QUALITY_VERSION = "satquery-quality-v4"
+QUALITY_VERSION = "satquery-quality-v6-scale-matched"
 SAM_REPO = "facebook/sam2.1-hiera-tiny"
 SAM_REVISION = "de431c4043854a71d8101e17995dfe596bf101a5"
 SEGMENTATION_REPO = globals().get("SATQUERY_SEGMENTATION_PATH") or "wu-pr-gw/segformer-b2-finetuned-with-LoveDA"
 SEGMENTATION_REVISION = globals().get("SATQUERY_SEGMENTATION_SHA") or "5c74556c08bebb5f45f50b6f78f61a62c5d220c7"
 SEGMENTATION_LOAD_REVISION = None if globals().get("SATQUERY_SEGMENTATION_PATH") else SEGMENTATION_REVISION
+SEGMENTATION_RELEASE_STATUS = globals().get("SATQUERY_SEGMENTATION_RELEASE_STATUS", "transfer_baseline_unvalidated")
+SEGMENTATION_RELEASE_WARNING = globals().get("SATQUERY_SEGMENTATION_RELEASE_WARNING", "")
 QUALITY_IMAGE_EDGE = 1024
 QUALITY_MAX_TOKENS = 768
 QUALITY_MAX_TARGETS = 3
 QUALITY_MAX_BOXES = 4
+QUALITY_VERBOSE_NARRATIVE = True  # Jury/demo profile: favor a complete report over lower latency.
+QUALITY_TILED_SEGMENTATION = False  # Experimental ablation; validate before promoting.
+
+
+def quality_preprocessing_contract(root):
+    """Recover the actual validation resize, not the processor's unused size default."""
+    if not root:
+        return {"mode": "published_processor", "input_size": None}
+    report = json.loads((Path(root) / "training_manifest.json").read_text())
+    size = report.get("config", {}).get("crop_size")
+    if type(size) is not int or not 128 <= size <= 1024:
+        raise ValueError("SegFormer export has no supported, recorded validation crop_size.")
+    return {"mode": "training_matched_full_scene", "input_size": size,
+            "image_resize": "opencv_linear", "logit_resize": "bilinear_align_corners_false",
+            "source": "training_manifest.json:config.crop_size"}
+
+
+SEGMENTATION_PREPROCESSING = quality_preprocessing_contract(globals().get("SATQUERY_SEGMENTATION_PATH"))
 
 assert "model" in globals() and "app" in globals(), "Run notebook sections 0–6 first."
 assert not inference_lock.locked(), "Wait for the current analysis to finish before applying this cell."
@@ -60,9 +82,11 @@ if globals().get("quality_segmentation_revision") != SEGMENTATION_REVISION:
         # The exact immutable revision is mandatory; our own trained replacement exports
         # safetensors and should supersede this experimental baseline after evaluation.
         use_safetensors=bool(globals().get("SATQUERY_SEGMENTATION_PATH")),
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32 if globals().get("SATQUERY_SEGMENTATION_PATH") else torch.float16,
     ).to("cuda:0").eval()
     quality_segmentation_revision = SEGMENTATION_REVISION
+    if not all(torch.isfinite(value).all() for value in quality_segmentation.state_dict().values()):
+        raise FloatingPointError("Segmentation checkpoint has non-finite weights; refusing to serve it.")
 
 
 SEMANTIC_TARGETS = {
@@ -164,24 +188,51 @@ def quality_segment(image, boxes, valid):
 
 
 @torch.inference_mode()
-def quality_semantic_mask(image, target, valid):
+def quality_semantic_prediction(image):
+    """Reuse scene probabilities across targets; optional bounded overlap tiles."""
+    tiled = globals().get("QUALITY_TILED_SEGMENTATION", False)
+    contract = globals().get("SEGMENTATION_PREPROCESSING", {"input_size": None})
+    if tiled and contract.get("input_size"):
+        raise ValueError("Tiled inference is not validated for this full-scene-trained checkpoint.")
+    edge, stride = 512, 448
+    def starts(length):
+        return sorted(set([*range(0, max(1, length - edge + 1), stride), max(0, length - edge)]))
+    crops = [(0, 0, image.width, image.height)] if not tiled else [
+        (x, y, min(x + edge, image.width), min(y + edge, image.height))
+        for y in starts(image.height) for x in starts(image.width)
+    ]
+    total = np.zeros((int(quality_segmentation.config.num_labels), image.height, image.width), np.float32)
+    counts = np.zeros((image.height, image.width), np.float32)
+    for left, top, right, bottom in crops:
+        crop = image.crop((left, top, right, bottom))
+        if contract.get("input_size"):
+            # Match Albumentations A.Resize's default cv2.INTER_LINEAR exactly.
+            import cv2
+            size = contract["input_size"]
+            crop = cv2.resize(np.asarray(crop), (size, size), interpolation=cv2.INTER_LINEAR)
+        inputs = quality_segmentation_processor(images=crop, return_tensors="pt")
+        values = inputs["pixel_values"].to(quality_segmentation.device, dtype=quality_segmentation.dtype)
+        logits = quality_segmentation(pixel_values=values).logits.float()
+        if not torch.isfinite(logits).all():
+            raise ValueError("Non-finite semantic logits")
+        probabilities = torch.nn.functional.interpolate(
+            logits, size=(bottom - top, right - left), mode="bilinear", align_corners=False
+        )[0].softmax(dim=0).cpu().numpy()
+        total[:, top:bottom, left:right] += probabilities
+        counts[top:bottom, left:right] += 1
+    if not (counts > 0).all():
+        raise ValueError("Uncovered segmentation grid")
+    return total / counts[None]
+
+
+@torch.inference_mode()
+def quality_semantic_mask(image, target, valid, prediction_data=None):
     """Return a whole-scene LoveDA class mask; confidence is diagnostic, not calibrated."""
     requested_labels = SEMANTIC_TARGETS.get(str(target).strip().lower())
     if not requested_labels:
         return None
-    inputs = quality_segmentation_processor(images=image, return_tensors="pt")
-    pixel_values = inputs["pixel_values"].to(
-        quality_segmentation.device, dtype=quality_segmentation.dtype
-    )
-    logits = quality_segmentation(pixel_values=pixel_values).logits
-    logits = torch.nn.functional.interpolate(
-        logits,
-        size=(image.height, image.width),
-        mode="bilinear",
-        align_corners=False,
-    )[0]
-    probabilities = logits.softmax(dim=0)
-    prediction = probabilities.argmax(dim=0)
+    probabilities = prediction_data if prediction_data is not None else quality_semantic_prediction(image)
+    prediction = probabilities.argmax(axis=0)
     id2label = {
         int(class_id): str(label).strip().lower()
         for class_id, label in quality_segmentation.config.id2label.items()
@@ -191,11 +242,11 @@ def quality_semantic_mask(image, target, valid):
     ]
     if not selected_ids:
         raise ValueError(f"The semantic checkpoint has no class mapping for {target}")
-    mask_tensor = torch.zeros_like(prediction, dtype=torch.bool)
+    mask_tensor = np.zeros_like(prediction, dtype=bool)
     for class_id in selected_ids:
         mask_tensor |= prediction == class_id
-    mask = mask_tensor.cpu().numpy() & valid
-    selected_probability = probabilities[selected_ids].sum(dim=0).float().cpu().numpy()
+    mask = mask_tensor & valid
+    selected_probability = probabilities[selected_ids].sum(axis=0)
     mean_probability = float(selected_probability[mask].mean()) if mask.any() else 0.0
     return mask, mean_probability, [id2label[class_id] for class_id in selected_ids]
 
@@ -241,16 +292,37 @@ def quality_guard_narrative(text):
     return guarded, removed
 
 
+def quality_mask_only_request(task, contract):
+    """Skip language generation only for an explicitly simple, supported overlay request."""
+    if globals().get("QUALITY_VERBOSE_NARRATIVE", True):
+        return False
+    targets = contract.step.permitted_params.get("targets", [])
+    return (task == "grounding" and contract.assets[0].modality != "sar"
+            and bool(targets) and len(targets) <= QUALITY_MAX_TARGETS
+            and all(t in SEMANTIC_TARGETS for t in targets)
+            and bool(re.fullmatch(
+                r"(?:please\s+)?(?:show|mark|outline|highlight|segment|map)(?:\s+me)?\s+"
+                r"(?:(?:all|the)\s+)*(?:water(?:\s+bodies)?|vegetation|forest|buildings?|roads?|cropland)"
+                r"(?:\s+(?:in|on)\s+(?:this|the)\s+(?:image|scene|region|area))?[.!?]*",
+                contract.query.strip(), flags=re.IGNORECASE)))
+
+
 def quality_analyze(data, task, contract):
+    import time
+    started = time.perf_counter()
     image, valid, info = quality_decode(data)
     asset_id = contract.assets[0].id
     context = contract.context.model_dump(mode="json") if contract.context else None
-    observation = quality_generate(
+    is_sar = contract.assets[0].modality == "sar"
+    mask_only = globals().get("quality_mask_only_request", lambda *_: False)(task, contract)
+    observation = ("Standalone SAR language interpretation is not validated by this optical VLM. "
+                   "No water/land-cover claim is asserted; use the sensor-qualified S1/S2 pair specialist.") if is_sar else ("" if mask_only else quality_generate(
         image, contract.query + "\nGive a brief observation from visible pixels only.", 128, use_adapter=True,
-    )
+    ))
+    verbose = globals().get("QUALITY_VERBOSE_NARRATIVE", False) and not is_sar and not mask_only
     narrative = quality_generate(image,
         "You are writing an evidence-conscious remote-sensing report. Answer the user's actual question "
-        "in 250–400 words when supported. Use six concise headings: Direct answer; Water and drainage; "
+        "in 350–550 words when the pixels support that depth. Use six clear headings: Direct answer; Water and drainage; "
         "Vegetation and bare surfaces; Built features and access; Visibility and ambiguity; "
         "Verification priorities. Cover each category briefly; explicitly say unclear or not resolved "
         "when evidence is insufficient. Describe image-relative shapes, distribution, texture and "
@@ -262,12 +334,13 @@ def quality_analyze(data, task, contract):
         "hypotheses and identify evidence needed to test each hypothesis. Do not pad or repeat. "
         "The image may be a stretched band preview, not calibrated true color. "
         f"\nUser question: {contract.query}\n"
-        + context_text(context), QUALITY_MAX_TOKENS,
-    )
+        + context_text(context), min(512, QUALITY_MAX_TOKENS),
+    ) if verbose else observation
     narrative, removed_narrative_claims = quality_guard_narrative(narrative)
     warnings = [
-        "Narrative and target proposals use the base Qwen3-VL instruction model with the adapter temporarily disabled; "
-        "the released adapter supplies the short observation. Neither is a calibrated correctness estimate.",
+        ("Mask-only fast path: semantic model ran; no Qwen text generation or SAM proposal ran." if mask_only else
+         "Optional narrative uses the base instruction model; it is not verified evidence." if verbose else
+         "Fast mode uses one adapted observation. Report measurements come from masks/metadata, not longer invented prose."),
         "SAM 2 only refines proposed regions. A water label is inherited from the Qwen proposal, not "
         "independently verified by SAM. Masks are candidates and may miss water or include non-water.",
         "No pixel accuracy or IoU on this scene is known. Thin features and boundaries may be lost on the bounded analysis grid.",
@@ -275,17 +348,22 @@ def quality_analyze(data, task, contract):
         "probabilities are uncalibrated and its geographic/resolution transfer to this image "
         "has not been established.",
     ]
+    if SEGMENTATION_RELEASE_WARNING:
+        warnings.insert(0, SEGMENTATION_RELEASE_WARNING)
     if not info["declared_rgb"]:
         warnings.append("RGB band mapping was not declared; the first three bands form an assumed display preview. "
                         "Verify their order before trusting color-based interpretation or target proposals.")
     evidence = []
     mask_diagnostics = []
+    shared_semantic_prediction = None
     if task == "grounding" and contract.assets[0].modality != "sar":
         targets = contract.step.permitted_params.get("targets", [])
         if not targets:
             warnings.append("No supported target class was identified. Ask to outline water, buildings, roads, forest or cropland.")
         for target in targets[:QUALITY_MAX_TARGETS]:
-            semantic = quality_semantic_mask(image, target, valid)
+            if target in globals().get("SEMANTIC_TARGETS", {}) and shared_semantic_prediction is None:
+                shared_semantic_prediction = quality_semantic_prediction(image)
+            semantic = quality_semantic_mask(image, target, valid, shared_semantic_prediction)
             if semantic is not None:
                 mask, semantic_score, semantic_labels = semantic
                 if not mask.any():
@@ -295,13 +373,14 @@ def quality_analyze(data, task, contract):
                     continue
                 evidence.append({
                     "id": f"ev_semantic_{len(evidence) + 1}", "type": "mask",
-                    "label": f"{target} candidate (LoveDA SegFormer)",
+                    "label": f"{target} candidate (LoveDA SegFormer" + ("; EXPERIMENTAL" if SEGMENTATION_RELEASE_WARNING else "") + ")",
                     "score": min(0.59, semantic_score),
                     "coordinate_space": "pixel", "asset_id": asset_id, "artifact_url": None,
                     "geometry": {"encoding": "png-base64", "data": quality_png(mask),
                                  "width": image.width, "height": image.height,
-                                 "method": "whole-scene LoveDA SegFormer semantic classes",
+                                 "method": "tiled LoveDA SegFormer experimental ablation" if globals().get("QUALITY_TILED_SEGMENTATION", False) else "whole-scene LoveDA SegFormer semantic classes",
                                  "status": "candidate", "target": target,
+                                 "release_status": SEGMENTATION_RELEASE_STATUS,
                                  "semantic_classes": semantic_labels},
                 })
                 mask_diagnostics.append({
@@ -344,21 +423,34 @@ def quality_analyze(data, task, contract):
                 torch.cuda.empty_cache()
     elif task == "grounding":
         warnings.append("RGB SAM segmentation is disabled for SAR. Use a validated SAR specialist.")
+    if mask_only:
+        rows = [f"- {d['target']}: {d['selected_pixel_fraction']:.2%} of valid analysis pixels selected."
+                for d in mask_diagnostics if "selected_pixel_fraction" in d]
+        narrative = ("## Requested overlay\n\n" + ("\n".join(rows) if rows else
+                     "The model selected no pixels for the requested target. This does not prove absence.")
+                     + "\n\nThese are candidate semantic masks, not verified boundaries or physical-area measurements. "
+                     "Thin features may be lost. Review the original image and held-out labelled examples.")
     return {
         "task": task, "text": narrative or observation or "No visual interpretation was returned.",
         "facts": [
-            {"name": "short_adapter_observation", "value": observation, "model": MODEL_VERSION},
-            {"name": "narrative_model", "value": f"{BASE_MODEL}@{BASE_REVISION}", "adapter_enabled": False},
+            {"name": "scope_abstention" if is_sar else ("measured_mask_report" if mask_only else "short_adapter_observation"), "value": narrative if mask_only else observation, "model": "mask-measurements" if mask_only else ("scope-policy" if is_sar else MODEL_VERSION)},
+            {"name": "narrative_model", "value": "mask-measurements" if mask_only else ("scope-policy" if is_sar else (f"{BASE_MODEL}@{BASE_REVISION}" if verbose else MODEL_VERSION)), "adapter_enabled": not verbose and not is_sar and not mask_only},
             {"name": "segmentation_model", "value": f"{SAM_REPO}@{SAM_REVISION}"},
             {"name": "semantic_segmentation_model",
              "value": f"{SEGMENTATION_REPO}@{SEGMENTATION_REVISION}"},
+            {"name": "semantic_segmentation_release_status", "value": SEGMENTATION_RELEASE_STATUS},
+            {"name": "segmentation_preprocessing", "value": globals().get("SEGMENTATION_PREPROCESSING", {})},
             {"name": "analysis_grid", "value": info},
             {"name": "mask_diagnostics", "value": mask_diagnostics},
             {"name": "guarded_narrative_claim_count", "value": len(removed_narrative_claims)},
             {"name": "quality_pipeline", "value": QUALITY_VERSION},
+            {"name": "runtime_profile", "value": {"verbose_narrative": verbose,
+                "mask_only_fastpath": mask_only,
+                "tiled_segmentation": globals().get("QUALITY_TILED_SEGMENTATION", False),
+                "total_seconds": round(time.perf_counter() - started, 3)}},
         ],
-        "evidence": evidence, "raw_score": 0.5, "score_kind": "uncalibrated",
-        "model_version": f"{QUALITY_VERSION};adapter={MODEL_VERSION};narrative={BASE_MODEL}@{BASE_REVISION[:12]};semantic={SEGMENTATION_REVISION[:12]};sam={SAM_REVISION[:12]}",
+        "evidence": evidence, "raw_score": 0.0 if is_sar else 0.5, "score_kind": "uncalibrated",
+        "model_version": f"{QUALITY_VERSION};adapter={MODEL_VERSION};narrative={BASE_MODEL}@{BASE_REVISION[:12]};semantic={SEGMENTATION_REVISION[:12]};sam={SAM_REVISION[:12]}" + (":abstained" if is_sar else ""),
         "warnings": warnings,
     }
 
@@ -422,7 +514,7 @@ for quality_route in app.routes:
         quality_route.endpoint = quality_ready
         quality_route.dependant.call = quality_ready
 
-print("Quality v4 installed: class-aware whole-scene masks + Qwen/SAM fallback. No paid service created.")
+print("Quality v5 installed: lean adapted observation, class-aware masks and optional ablations. No paid service created.")
 print("Now run section 7, then sections 8 and 9 if the tunnel is not already live. Keep section 10 running for the attended demo.")
 print("Test in the website: 'Outline the visible water bodies and give a detailed report of their spatial pattern and limitations.'")
 print("Loading these models is not evidence of mask accuracy. Inspect real satellite cases and evaluate labelled masks.")

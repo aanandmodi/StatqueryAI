@@ -1,0 +1,706 @@
+{
+  "purpose": "Presentation inputs, not evidence of model accuracy",
+  "files": [
+    {
+      "file": "01_single/01_mixed_landcover_rgb.tif",
+      "source_local": "preserved user-supplied demo input",
+      "sha256": "90e611b06752b44ddafd0259d12becd685ce10d0676bd533e4ede93bb7b655ce",
+      "bytes": 6018396,
+      "role": "single",
+      "modality": "optical",
+      "input_profile": "strict",
+      "pair_id": null,
+      "provenance": {
+        "status": "user-supplied preserved demo input; acquisition date/license not independently verified"
+      },
+      "width": 1001,
+      "height": 1001,
+      "bands": 3,
+      "dtypes": [
+        "uint16",
+        "uint16",
+        "uint16"
+      ],
+      "crs": "EPSG:32631",
+      "transform": [
+        10.0,
+        0.0,
+        590520.0,
+        0.0,
+        -10.0,
+        5790630.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        null,
+        null,
+        null
+      ],
+      "tags": {
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "01_single/02_india_water_multispectral.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "8f33f71f15a05b27749f0cbf425543740d827e63d4e4eaee97b61ca0a390e177",
+      "bytes": 2335132,
+      "role": "single",
+      "modality": "multispectral",
+      "input_profile": "strict",
+      "pair_id": "India_1018327",
+      "provenance": {
+        "file": "India_1018327_S2Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/India_1018327_S2Hand.tif?generation=1601573340510437",
+        "source_sha256": "2d162175fec6842370d1bb224414f132dbc5463d0a0ef64baae8692942b5d585",
+        "prepared_sha256": "8f33f71f15a05b27749f0cbf425543740d827e63d4e4eaee97b61ca0a390e177",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 13,
+      "dtypes": [
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        93.78124105316886,
+        0.0,
+        -8.983152841195215e-05,
+        26.63037693466639,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-2",
+        "representation": "toa_reflectance_10000",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "2d162175fec6842370d1bb224414f132dbc5463d0a0ef64baae8692942b5d585",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/India_1018327_S2Hand.tif?generation=1601573340510437",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "02_temporal/01_nepal_BEFORE.tif",
+      "source_local": "preserved user-supplied demo input",
+      "sha256": "3e619954824789e0117c02034d978ff5281c232bbd68c32dd84fa86cf4ecc73a",
+      "bytes": 3884396,
+      "role": "time_a",
+      "modality": "optical",
+      "input_profile": "exploration",
+      "pair_id": "nepal_display_pair",
+      "provenance": {
+        "status": "user-supplied preserved demo input; acquisition date/license not independently verified"
+      },
+      "width": 1100,
+      "height": 1177,
+      "bands": 3,
+      "dtypes": [
+        "uint8",
+        "uint8",
+        "uint8"
+      ],
+      "crs": null,
+      "transform": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        null,
+        null,
+        null
+      ],
+      "tags": {}
+    },
+    {
+      "file": "02_temporal/02_nepal_AFTER.tif",
+      "source_local": "preserved user-supplied demo input",
+      "sha256": "0554422626fadd0b8b4d832952878263b424f38f92a7b117709190cc8cadc30b",
+      "bytes": 3884396,
+      "role": "time_b",
+      "modality": "optical",
+      "input_profile": "exploration",
+      "pair_id": "nepal_display_pair",
+      "provenance": {
+        "status": "user-supplied preserved demo input; acquisition date/license not independently verified"
+      },
+      "width": 1100,
+      "height": 1177,
+      "bands": 3,
+      "dtypes": [
+        "uint8",
+        "uint8",
+        "uint8"
+      ],
+      "crs": null,
+      "transform": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        null,
+        null,
+        null
+      ],
+      "tags": {}
+    },
+    {
+      "file": "03_fusion/india/01_OPTICAL_Sentinel2_13bands.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "8f33f71f15a05b27749f0cbf425543740d827e63d4e4eaee97b61ca0a390e177",
+      "bytes": 2335132,
+      "role": "optical",
+      "modality": "multispectral",
+      "input_profile": "strict",
+      "pair_id": "India_1018327",
+      "provenance": {
+        "file": "India_1018327_S2Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/India_1018327_S2Hand.tif?generation=1601573340510437",
+        "source_sha256": "2d162175fec6842370d1bb224414f132dbc5463d0a0ef64baae8692942b5d585",
+        "prepared_sha256": "8f33f71f15a05b27749f0cbf425543740d827e63d4e4eaee97b61ca0a390e177",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 13,
+      "dtypes": [
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        93.78124105316886,
+        0.0,
+        -8.983152841195215e-05,
+        26.63037693466639,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-2",
+        "representation": "toa_reflectance_10000",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "2d162175fec6842370d1bb224414f132dbc5463d0a0ef64baae8692942b5d585",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/India_1018327_S2Hand.tif?generation=1601573340510437",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "03_fusion/india/02_SAR_Sentinel1_VV_VH.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "e9323d57d607aba80ea8e9dac9672cc7a54f876ec2ad4f793065329c89ab1e89",
+      "bytes": 1670978,
+      "role": "sar",
+      "modality": "sar",
+      "input_profile": "strict",
+      "pair_id": "India_1018327",
+      "provenance": {
+        "file": "India_1018327_S1Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S1Hand/India_1018327_S1Hand.tif?generation=1601572739828650",
+        "source_sha256": "d69a706c250dd3dd37ff43eb4969117460abd64d3280bca71fdd9916f4f3d6b1",
+        "prepared_sha256": "e9323d57d607aba80ea8e9dac9672cc7a54f876ec2ad4f793065329c89ab1e89",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 2,
+      "dtypes": [
+        "float32",
+        "float32"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        93.78124105316886,
+        0.0,
+        -8.983152841195215e-05,
+        26.63037693466639,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "VV",
+        "VH"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-1",
+        "representation": "sigma0_db",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "d69a706c250dd3dd37ff43eb4969117460abd64d3280bca71fdd9916f4f3d6b1",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S1Hand/India_1018327_S1Hand.tif?generation=1601572739828650",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "04_reference_labels_DO_NOT_UPLOAD/india_water_ground_truth.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "6b6e38cf8e4b908dc8955d73cb21b4f583a4e744525d1b08f6b3e6d2b010d42c",
+      "bytes": 12080,
+      "role": "reference_only",
+      "modality": "label",
+      "input_profile": "not_an_input",
+      "pair_id": "India_1018327",
+      "provenance": {
+        "file": "India_1018327_LabelHand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/LabelHand/India_1018327_LabelHand.tif?generation=1601572621641178",
+        "source_sha256": "98290650b74df82e3acc22aaef90bcb4272821b2afb53f05af683f94b5fe1b56",
+        "prepared_sha256": "6b6e38cf8e4b908dc8955d73cb21b4f583a4e744525d1b08f6b3e6d2b010d42c",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 1,
+      "dtypes": [
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195857e-05,
+        0.0,
+        93.78124105316886,
+        0.0,
+        -8.983152841195857e-05,
+        26.63037693466639,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "water_label"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "98290650b74df82e3acc22aaef90bcb4272821b2afb53f05af683f94b5fe1b56",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/LabelHand/India_1018327_LabelHand.tif?generation=1601572621641178",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "03_fusion/ghana/01_OPTICAL_Sentinel2_13bands.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "b4dae87a130004e7bfa221613a1289d1980aa6030be0f0d248db84280697ebaf",
+      "bytes": 2127672,
+      "role": "optical",
+      "modality": "multispectral",
+      "input_profile": "strict",
+      "pair_id": "Ghana_1078550",
+      "provenance": {
+        "file": "Ghana_1078550_S2Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/Ghana_1078550_S2Hand.tif?generation=1601573223847936",
+        "source_sha256": "34ed826c9e19dfe667b89f541259698d2ed6826bf6883c7a4c05cb8df3393f81",
+        "prepared_sha256": "b4dae87a130004e7bfa221613a1289d1980aa6030be0f0d248db84280697ebaf",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 13,
+      "dtypes": [
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        -1.1498435636729876,
+        0.0,
+        -8.983152841195215e-05,
+        10.670548270885323,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-2",
+        "representation": "toa_reflectance_10000",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "34ed826c9e19dfe667b89f541259698d2ed6826bf6883c7a4c05cb8df3393f81",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/Ghana_1078550_S2Hand.tif?generation=1601573223847936",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "03_fusion/ghana/02_SAR_Sentinel1_VV_VH.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "6dc3c38fb2c5aba9b70a223a82fa5f83865d5f5603f85718d32a1523057b0ce6",
+      "bytes": 1774412,
+      "role": "sar",
+      "modality": "sar",
+      "input_profile": "strict",
+      "pair_id": "Ghana_1078550",
+      "provenance": {
+        "file": "Ghana_1078550_S1Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S1Hand/Ghana_1078550_S1Hand.tif?generation=1601572673890974",
+        "source_sha256": "8ce880a2236c57b3a4ef9b6c575648d21813e8a10bab2c7bc82cb1fee197e027",
+        "prepared_sha256": "6dc3c38fb2c5aba9b70a223a82fa5f83865d5f5603f85718d32a1523057b0ce6",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 2,
+      "dtypes": [
+        "float32",
+        "float32"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        -1.1498435636729876,
+        0.0,
+        -8.983152841195215e-05,
+        10.670548270885323,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "VV",
+        "VH"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-1",
+        "representation": "sigma0_db",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "8ce880a2236c57b3a4ef9b6c575648d21813e8a10bab2c7bc82cb1fee197e027",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S1Hand/Ghana_1078550_S1Hand.tif?generation=1601572673890974",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "04_reference_labels_DO_NOT_UPLOAD/ghana_water_ground_truth.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "b7c3fd50b8b743e2e588544764b0f6c1d25b20beeb799fbfc5be6762ea05f2a1",
+      "bytes": 2996,
+      "role": "reference_only",
+      "modality": "label",
+      "input_profile": "not_an_input",
+      "pair_id": "Ghana_1078550",
+      "provenance": {
+        "file": "Ghana_1078550_LabelHand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/LabelHand/Ghana_1078550_LabelHand.tif?generation=1601572621268494",
+        "source_sha256": "a4cdde6d206b3e151171f37cf8a287d6ded59a3d6da5a848a5cc79b38772d111",
+        "prepared_sha256": "b7c3fd50b8b743e2e588544764b0f6c1d25b20beeb799fbfc5be6762ea05f2a1",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 1,
+      "dtypes": [
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195184e-05,
+        0.0,
+        -1.1498435636729876,
+        0.0,
+        -8.983152841195184e-05,
+        10.670548270885323,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "water_label"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "a4cdde6d206b3e151171f37cf8a287d6ded59a3d6da5a848a5cc79b38772d111",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/LabelHand/Ghana_1078550_LabelHand.tif?generation=1601572621268494",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "03_fusion/mekong/01_OPTICAL_Sentinel2_13bands.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "4525e66961134ee978f395122fa5c5b093bbbab7964a1fa93abcf7598f3781a9",
+      "bytes": 2350642,
+      "role": "optical",
+      "modality": "multispectral",
+      "input_profile": "strict",
+      "pair_id": "Mekong_1443339",
+      "provenance": {
+        "file": "Mekong_1443339_S2Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/Mekong_1443339_S2Hand.tif?generation=1601573449237064",
+        "source_sha256": "afbc01a747e5c6d7b6b51c733c92c187323f25d7a24f8f7411836a326b09201b",
+        "prepared_sha256": "4525e66961134ee978f395122fa5c5b093bbbab7964a1fa93abcf7598f3781a9",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 13,
+      "dtypes": [
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16",
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        105.8775953430087,
+        0.0,
+        -8.983152841195215e-05,
+        12.326323002574426,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B10",
+        "B11",
+        "B12"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-2",
+        "representation": "toa_reflectance_10000",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "afbc01a747e5c6d7b6b51c733c92c187323f25d7a24f8f7411836a326b09201b",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S2Hand/Mekong_1443339_S2Hand.tif?generation=1601573449237064",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "03_fusion/mekong/02_SAR_Sentinel1_VV_VH.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "953bb4ac7773b6acc47c3372a87534ff7c4a1268298061b8507ac4052e187262",
+      "bytes": 1783914,
+      "role": "sar",
+      "modality": "sar",
+      "input_profile": "strict",
+      "pair_id": "Mekong_1443339",
+      "provenance": {
+        "file": "Mekong_1443339_S1Hand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S1Hand/Mekong_1443339_S1Hand.tif?generation=1601572858443330",
+        "source_sha256": "cee6ea28c9f700f7d04b16f036fe504e0e836eab9f1b00420fe332366c985ab3",
+        "prepared_sha256": "953bb4ac7773b6acc47c3372a87534ff7c4a1268298061b8507ac4052e187262",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 2,
+      "dtypes": [
+        "float32",
+        "float32"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195215e-05,
+        0.0,
+        105.8775953430087,
+        0.0,
+        -8.983152841195215e-05,
+        12.326323002574426,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "VV",
+        "VH"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "platform": "Sentinel-1",
+        "representation": "sigma0_db",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "cee6ea28c9f700f7d04b16f036fe504e0e836eab9f1b00420fe332366c985ab3",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/S1Hand/Mekong_1443339_S1Hand.tif?generation=1601572858443330",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    {
+      "file": "04_reference_labels_DO_NOT_UPLOAD/mekong_water_ground_truth.tif",
+      "source_local": "official Sen1Floods11 download; URL retained below",
+      "sha256": "59766eee1d526759ea2e21962b7e368ffc7b988c551cc224a3ffba3649f09aa2",
+      "bytes": 14768,
+      "role": "reference_only",
+      "modality": "label",
+      "input_profile": "not_an_input",
+      "pair_id": "Mekong_1443339",
+      "provenance": {
+        "file": "Mekong_1443339_LabelHand.tif",
+        "source": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/LabelHand/Mekong_1443339_LabelHand.tif?generation=1601572622248449",
+        "source_sha256": "e306812aaf1587c46f9b2a0c63e4af4fe46ac9fd46a9e6286dd41d70f824454e",
+        "prepared_sha256": "59766eee1d526759ea2e21962b7e368ffc7b988c551cc224a3ffba3649f09aa2",
+        "change": "Metadata and encoding only; pixel arrays unchanged. Band/units from official README.",
+        "split": "test"
+      },
+      "width": 512,
+      "height": 512,
+      "bands": 1,
+      "dtypes": [
+        "int16"
+      ],
+      "crs": "EPSG:4326",
+      "transform": [
+        8.983152841195857e-05,
+        0.0,
+        105.8775953430087,
+        0.0,
+        -8.983152841195857e-05,
+        12.326323002574426,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "band_descriptions": [
+        "water_label"
+      ],
+      "tags": {
+        "OVR_RESAMPLING_ALG": "NEAREST",
+        "source_dataset": "Sen1Floods11 v1.1",
+        "source_sha256": "e306812aaf1587c46f9b2a0c63e4af4fe46ac9fd46a9e6286dd41d70f824454e",
+        "source_url": "https://storage.googleapis.com/sen1floods11/v1.1/data/flood_events/HandLabeled/LabelHand/Mekong_1443339_LabelHand.tif?generation=1601572622248449",
+        "AREA_OR_POINT": "Area"
+      }
+    }
+  ],
+  "notes": [
+    "Copied bytes unchanged; no new acquisition metadata invented.",
+    "Reference labels are never model inputs.",
+    "Nepal pair is pixel-grid exploration; no verified dates or metric area.",
+    "Flood examples were retained from the earlier audit, not selected by new demo scores."
+  ]
+}

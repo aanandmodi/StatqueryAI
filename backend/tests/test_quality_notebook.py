@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
 import rasterio
 from PIL import Image
 from rasterio.enums import Resampling
@@ -20,7 +21,10 @@ PATCH = Path(__file__).resolve().parents[2] / "notebooks/patches/quality_upgrade
 
 
 def functions(*names, **namespace):
+    namespace.setdefault("QUALITY_VERBOSE_NARRATIVE", True)
     namespace.setdefault("semantic_indexes", semantic_indexes)
+    namespace.setdefault("SEGMENTATION_RELEASE_STATUS", "transfer_baseline_unvalidated")
+    namespace.setdefault("SEGMENTATION_RELEASE_WARNING", "")
     tree = ast.parse(PATCH.read_text(encoding="utf-8"))
     nodes = [
         node
@@ -122,7 +126,8 @@ def test_report_and_masks_have_separate_provenance():
     assert result["facts"][1]["adapter_enabled"] is False
 
 
-def test_supported_land_cover_uses_whole_scene_semantic_mask_before_qwen_sam():
+@pytest.mark.parametrize("experimental", [False, True])
+def test_supported_land_cover_uses_whole_scene_semantic_mask_before_qwen_sam(experimental):
     import base64
 
     semantic_mask = np.zeros((64, 64), dtype=bool)
@@ -164,11 +169,18 @@ def test_supported_land_cover_uses_whole_scene_semantic_mask_before_qwen_sam():
         step=SimpleNamespace(permitted_params={"targets": ["water"]}),
     )
 
+    if experimental:
+        namespace["SEGMENTATION_RELEASE_STATUS"] = "experimental_failed_release_gate"
+        namespace["SEGMENTATION_RELEASE_WARNING"] = "EXPERIMENTAL: failed project gate."
     result = namespace["quality_analyze"](b"bytes", "grounding", contract)
 
     assert len(result["evidence"]) == 1
     evidence = result["evidence"][0]
-    assert evidence["label"] == "water candidate (LoveDA SegFormer)"
+    assert evidence["label"] == ("water candidate (LoveDA SegFormer; EXPERIMENTAL)" if experimental else "water candidate (LoveDA SegFormer)")
+    if experimental:
+        assert result["warnings"][0] == "EXPERIMENTAL: failed project gate."
+        assert evidence["geometry"]["release_status"] == "experimental_failed_release_gate"
+        assert result["score_kind"] == "uncalibrated"
     assert evidence["score"] == 0.59  # uncalibrated transfer score remains capped
     assert evidence["geometry"]["method"] == "whole-scene LoveDA SegFormer semantic classes"
     assert np.array_equal(semantic_mask, decode_mask(evidence["geometry"]))
@@ -224,6 +236,38 @@ def test_metrics_empty_masks_are_not_reported_as_perfect():
     assert scores["precision"] == 7 / 8
     assert scores["recall"] == 7 / 8
     assert scores["iou"] == 7 / 9
+
+
+@pytest.mark.parametrize("modality,calls", [("optical", 1), ("sar", 0)])
+def test_fast_profile_removes_second_generation_and_abstains_on_sar(modality, calls):
+    generator = Mock(return_value="A short adapted observation.")
+    namespace = functions(
+        "quality_analyze", QUALITY_VERBOSE_NARRATIVE=False,
+        quality_decode=lambda _: (Image.new("RGB", (32, 32)), np.ones((32, 32), bool), {"declared_rgb": True}),
+        quality_generate=generator, quality_guard_narrative=lambda text: (text, []),
+        MODEL_VERSION="adapter", BASE_MODEL="base", BASE_REVISION="sha",
+        SAM_REPO="sam", SAM_REVISION="sha", SEGMENTATION_REPO="seg", SEGMENTATION_REVISION="sha",
+        QUALITY_VERSION="v5", QUALITY_MAX_TARGETS=3,
+    )
+    contract = SimpleNamespace(query="Describe scene", context=None,
+        assets=[SimpleNamespace(id="a", modality=modality)],
+        step=SimpleNamespace(permitted_params={}))
+    result = namespace["quality_analyze"](b"bytes", "caption", contract)
+    assert generator.call_count == calls
+    if modality == "sar": assert "not validated" in result["text"]
+    assert result["score_kind"] == "uncalibrated"
+
+
+def test_semantic_reuses_probabilities_without_inventing_missing_vegetation():
+    probs = np.zeros((3, 8, 8), np.float32)
+    probs[0] = 0.9; probs[1] = 0.06; probs[2] = 0.04
+    namespace = functions("quality_semantic_mask", np=np,
+        SEMANTIC_TARGETS={"vegetation": {"forest", "agricultural"}},
+        quality_segmentation=SimpleNamespace(config=SimpleNamespace(id2label={0:"water",1:"forest",2:"agricultural"})),
+        quality_semantic_prediction=Mock(side_effect=AssertionError("No second forward")))
+    mask, diagnostic, labels=namespace["quality_semantic_mask"](
+        Image.new("RGB",(8,8)),"vegetation",np.ones((8,8),bool),probs)
+    assert not mask.any() and diagnostic==0 and labels==["forest","agricultural"]
 
 
 def test_live_route_replacement_preserves_auth_and_multipart_contract(make_asset):

@@ -1,187 +1,152 @@
 # SatQuery AI
 
-**Kaggle execution pack:** [six numbered notebooks and complete upload/run instructions](notebooks/kaggle-run-all/START_HERE.md).
-The final notebook includes quality, planning, trained pair loading and the attended ngrok server.
+<p align="center">
+  <strong>Ask the landscape. Follow the evidence.</strong><br />
+  An agentic vision-language workspace for single-scene, temporal-change and optical/SAR Earth-observation analysis.
+</p>
 
-**Training recovery R2 (2026-09-21):** [current results and revised 02–04 run instructions](docs/TRAINING_R2.md).
-Notebooks 01 and 05 are completed Qwen evaluations. Original 02/03 missed quality gates; 04 had
-NaN weights and must not be served. R2 fixes are ready for new Kaggle runs, **not yet passed model releases**.
+<p align="center">
+  <a href="docs/PROJECT_BOOK.md">Project book</a> ·
+  <a href="docs/RUNBOOK.md">Run locally</a> ·
+  <a href="docs/EVALUATION.md">Evaluation</a> ·
+  <a href="notebooks/kaggle-run-all/START_HERE.md">Kaggle notebooks</a>
+</p>
 
-SatQuery is a local-first, auditable remote-sensing assistant for satellite-image questions,
-captions, visual grounding, bi-temporal change analysis, and optical/SAR paired analysis. The
-released neural path uses the public
-[SatQuery Qwen3-VL LoRA](https://huggingface.co/aanandmodi/satquery-qwen3vl-bigearthnet-txt-lora)
-on the immutable `Qwen/Qwen3-VL-2B-Instruct` base revision.
+> SIH 26167 research prototype. SatQuery supports investigation; it is not a certified disaster-response, cadastral, navigation or safety system. Scores and model outputs preserve their documented dataset scope.
 
-**Nothing in the current workflow deploys the website.** The frontend, controller, database,
-uploads, reports, and overlay artifacts run locally. Model inference can run either on the laptop's
-NVIDIA GPU in 4-bit mode or, preferably, in an attended temporary Kaggle session while the website
-and backend remain local. The ngrok demo has a 60-minute maximum window and no automatic renewal.
-Managed Colab reverse-proxy serving is not supported; normal provider rules and quotas apply.
+![SatQuery home](docs/images/home.png)
 
-## What is real today
+## What it does
 
-**Critical-gap correction, 2026-09-04:** [Audit and honest release gates](docs/CRITICAL_GAPS.md),
-[exact Kaggle steps](docs/PAIRED_EXPERT_RUNBOOK.md). Compound target comparisons now use a bounded
-dependency plan and measured candidate loss/gain. The optional learned planner runs through the
-existing Kaggle service; apply the [one-cell notebook](notebooks/SatQuery_Live_Planning_Upgrade.ipynb)
-to an existing session. Cartosat/RISAT product metadata is recognized without guessing band identity.
-ChangeVQA training/serving and the new pixel-supervised TerraMind/Sen1Floods11 fusion notebook now
-match strict artifact contracts. Their trained artifacts and held-out accuracy evaluation **remain
-required**; no analytical baseline is renamed as a learned model.
-The last live service check reported quality-v3. Quality-v4 is prepared locally and must be applied
-inside the already-running Kaggle kernel before it can be claimed live.
+SatQuery turns a natural-language question and an evidence set into an inspectable analysis:
 
-**Studio update, 2026-09-04:** [New workflow guide](docs/STUDIO_GUIDE.md) and
-[model evaluation plan](docs/MODEL_EVALUATION_PLAN.md). Exploration supports optical JPG/PNG/WebP
-alongside TIFF while SIH strict remains separate. Investigation, Casebook, case detail, Archive
-and Methods are real local routes. Real JPEG → Kaggle Qwen/SAM → text/mask and the Nepal temporal
-TIFF pair were verified. Optical/SAR has synthetic integration coverage, not regional accuracy
-evidence. Live Sentinel discovery and NASA weather context work; historical crop/import/registration
-remains manual. No website was deployed or paid service provisioned.
+- **Single scene:** visual question answering, description, grounding and class masks.
+- **Bi-temporal pair:** learned question answering plus a semantic-change mask.
+- **Optical + SAR pair:** learned Sentinel-1/Sentinel-2 flood/water fusion.
+- **Evidence-first output:** answer, overlay, facts, warnings, model version, observable execution trace and downloadable PDF.
+- **Compound questions:** a bounded planner decomposes supported requests into explicit specialist steps; it does not expose or invent hidden chain-of-thought.
 
-This dated update supersedes older live-inference gates below. Scientific accuracy and learned-pair
-gates remain open. Earlier v2 observations below are historical; quality-v3 is now available on
-the running service. This does not establish regional segmentation accuracy.
-
-**Report/mask quality upgrade:** see [Analysis quality](docs/ANALYSIS_QUALITY.md).
-The local UI now supports binary masks, transparent overlays and detailed raster/mask reports.
-The updated Kaggle notebook includes **section 6b** for a longer base-instruction narrative,
-whole-scene LoveDA SegFormer class masks, and Qwen/SAM fallback for unsupported targets. Existing
-Kaggle sessions must run that cell; this is not a remotely applied model change or evidence of
-validated segmentation accuracy. The transfer checkpoint is experimental and has no declared
-license/model card. Train the user-owned replacement with
-[`SatQuery_SegFormer_LoveDA_Training.ipynb`](notebooks/SatQuery_SegFormer_LoveDA_Training.ipynb)
-and follow the [model-quality roadmap](docs/MODEL_QUALITY_ROADMAP.md).
-
-| Capability | State | Implementation |
-|---|---:|---|
-| GeoTIFF + location metadata | Ready | Raster validation plus bounded latitude, longitude, altitude and metadata |
-| Single-image VQA | Implemented; live inference gate required | Qwen3-VL 2B + released LoRA |
-| Scene caption | Implemented; live inference gate required | Same released specialist with a constrained prompt |
-| Grounding and marked image | Live v3 GPU mask verified; v4 accuracy unvalidated | Whole-scene semantic transfer baseline for named classes; Qwen + SAM fallback; verified-band spectral tools |
-| Spectral evidence | Implemented analytical tools | NDWI/NDVI with verified bands; NDBI/NBR/dNBR only for verified Sentinel-2 SWIR |
-| Multi-class overlays | Implemented | Bounded mask vectorization and class-coloured SVG polygons with raster fallback |
-| Text answer, warnings, provenance, trace | Ready | Schema-validated integration and SQLite job record |
-| RGB preview, informative JPEG overlay, PDF report | Ready | Overlay always labels metadata/answer; boxes appear only when valid |
-| Bi-temporal change analysis | Runnable CPU baseline | Quantified spectral-change proxy + evidence; learned CDVQA notebook remains release-gated |
-| Optical/SAR paired analysis | Runnable CPU baseline; learned path implemented but unreleased | Optical-context/backscatter fallback; TerraMind Sen1Floods11 pixel-mask training/runtime requires a passing v3 checkpoint |
-| Automatic agentic routing | Ready | Query + input configuration select one of five registered workflows |
-| Website deployment | Deliberately not performed | Hosting will be selected only after local acceptance |
-
-The current code/notebook checks do not establish a live Kaggle connection or semantic benchmark
-quality. Require the notebook smoke tests and real-image acceptance procedure below before a demo.
-Real base-versus-LoRA instructions and the CPU-only scorer are in
-[the real evaluation runbook](docs/REAL_EVALUATION_RUNBOOK.md). No benchmark number is shipped
-unless it can be traced to raw per-example predictions.
-
-The current 200-row validation aggregate and its unresolved raw-artifact gate are recorded in
-[docs/evaluation](docs/evaluation/README.md). Jury-ready, use-case-labelled TIFF inputs and their
-SHA-256 manifest are in [demo-assets](demo-assets/README.md).
-
-## Local topology
+The browser never receives the Kaggle/ngrok bearer token. The local FastAPI controller validates files and sensor contracts, plans bounded tasks, calls the authenticated model service, integrates evidence and stores cases locally.
 
 ```mermaid
 flowchart LR
-    Browser[Browser :3000] --> Web[Vinext/React local server]
-    Web -->|same-origin proxy| API[FastAPI controller :8000]
-    API --> DB[(Local SQLite)]
-    API --> Files[(Local uploads/reports)]
-    API -->|single-image tasks| Tunnel[Temporary ngrok URL]
-    Tunnel --> Model[Kaggle FastAPI :8080]
-    Model --> GPU[Free GPU + 4-bit base + LoRA]
-    API -->|paired tasks| Pair[Bounded local CPU tools]
+  U[Analyst] --> W[Local web workspace]
+  W --> P[Same-origin proxy]
+  P --> C[FastAPI controller]
+  C --> V[Raster + sensor validation]
+  V --> R[Policy planner]
+  R -->|single scene| Q[Qwen3-VL + SegFormer]
+  R -->|time A / time B| T[Temporal change expert]
+  R -->|optical / SAR| F[TerraMind fusion expert]
+  Q & T & F --> I[Evidence integration]
+  I --> D[(Local case store)]
+  I --> W
 ```
 
-The browser never receives model or Hugging Face credentials. It calls the local frontend route,
-which calls the controller, which is the only process allowed to call a model service.
+## Product
 
-## Fastest complete start: Kaggle GPU + local application
+| Home | Investigation workspace |
+|---|---|
+| ![Home page](docs/images/home.png) | ![Workspace](docs/images/workspace.png) |
 
-Requirements: a free Kaggle account, free ngrok account, Python 3.12 and Node.js 22+ locally.
+| Casebook | Methods and provenance |
+|---|---|
+| ![Casebook](docs/images/cases.png) | ![Methods](docs/images/methods.png) |
 
-1. Run `scripts/setup-local.ps1` once. It creates a separate `satquery-cloud` virtualenv without
-   installing local model/CUDA dependencies. Install Python 3.12 and Node.js first if missing.
-2. Upload [`SatQuery_Qwen3VL_Free_GPU_Server.ipynb`](notebooks/SatQuery_Qwen3VL_Free_GPU_Server.ipynb)
-   to Kaggle, enable GPU + Internet, and add `NGROK_AUTHTOKEN` plus
-   `SATQUERY_MODEL_SERVICE_TOKEN` as Kaggle Secrets.
-3. Run the inference notebook in order; require sections 5, 7 and 9 to print `PASS`. No retraining
-   or training-dataset import is needed. Synthetic smoke output proves transport, not task accuracy.
-4. Create root `.env` and `.env.local` from their examples only if absent. Set the printed ngrok
-   URL and identical service token in `.env`; keep `.env.local` pointed at the local backend.
-5. Start the local app:
+## Recorded evaluation
+
+These are separate held-out evaluations with different datasets and denominators. They must **not** be averaged into one “accuracy”. Full provenance and limitations are in [EVALUATION.md](docs/EVALUATION.md).
+
+| Specialist | Recorded held-out result | Release interpretation |
+|---|---:|---|
+| Qwen3-VL 2B + BigEarthNet.txt LoRA | VQA exact match **0.61**; grounding mean IoU **0.4227** | Domain-adapted sampled test evidence |
+| SegFormer-B0 + LoveDA | mean IoU **0.4206**; water IoU **0.5852** | Experimental: strict mean/forest gate did not pass |
+| Temporal ResNet18/GRU change expert | answer accuracy **0.7275**; mask IoU **0.4961** | Project test gate evidence retained |
+| TerraMind S1/S2 flood expert | flood IoU **0.7103**; Dice **0.8306** | Sentinel flood scope; not universal land-cover fusion |
+
+Confidence is not fabricated: uncalibrated model scores remain labelled as such and are capped/withheld where appropriate. The saved Qwen frozen-temperature diagnostic reduced ECE from **0.5516** to **0.1304**, but automatic probability release remains disabled.
+
+## Quick start
+
+### 1. Prerequisites
+
+- Windows/Linux/macOS, Python 3.11–3.12, Node.js 22+
+- For the real-model path: a free Kaggle GPU session, ngrok account, and the three private secrets described in the runbook
+- No local GPU is required for the normal remote-demo path
+
+### 2. Install
 
 ```powershell
-Set-Location D:\Projects\Sih-2026
-& "$env:USERPROFILE\.venvs\satquery-cloud\Scripts\python.exe" .\scripts\run-local.py --mode remote
+git clone https://github.com/aanandmodi/StatqueryAI.git
+Set-Location StatqueryAI
+Copy-Item .env.example .env
+Copy-Item .env.local.example .env.local
+./scripts/setup-local.ps1
+npm install
 ```
 
-Open `http://localhost:3000`. Keep notebook section 10 running while actively testing. Press
-`Ctrl+C` locally, interrupt section 10, then stop the Kaggle session to release GPU quota.
-After interruption, restart sections **6–10**, not only the tunnel cell. Exact setup, separate
-backend/frontend commands and troubleshooting: [NGROK_KAGGLE_RUNBOOK.md](docs/NGROK_KAGGLE_RUNBOOK.md).
+### 3. Start the model service
 
-## Why the website previously had no model answer
+Import [06_Demo_Current_Models_Ngrok.ipynb](notebooks/kaggle-run-all/06_Demo_Current_Models_Ngrok.ipynb) into Kaggle, attach the model artifacts when requested, enable a GPU and run all cells. Copy the generated connection values into the root `.env`. Keep that attended Kaggle session running.
 
-| Layer | Previous state | Correction |
-|---|---|---|
-| Hugging Face model Space | ZeroGPU creation returned `402` because of the account-age gate | No longer a default dependency |
-| Local model service | Defaulted to the wrong 4B base and required a local adapter directory | Now uses the exact pinned 2B base and public adapter |
-| Frontend fallback | Automatically tried the unavailable Space | Removed; all inference passes through the controller |
-| Laptop memory | BF16 weights could not fit safely in 4 GB VRAM | NF4 4-bit, 448px input, short generation, concurrency one |
+### 4. Start the local application
 
-## Repository map
+```powershell
+./.venv/Scripts/python.exe scripts/run-local.py --mode remote
+```
 
-| Path | Responsibility |
-|---|---|
-| `app/` | Local Vinext/React evidence workspace and server-side API proxy |
-| `backend/` | FastAPI validation, routing, orchestration, persistence, report/overlay API |
-| `model_service/` | Long-lived local Qwen/change/fusion specialist service |
-| `ml/` | Model loading, preprocessing, training, evaluation, and artifact utilities |
-| `notebooks/` | Cloud training/evaluation notebooks and Kaggle-only temporary ngrok inference demo |
-| `scripts/` | Local setup, startup, smoke, and runtime verification |
-| `docs/` | Requirements, system design, pipeline, API, security, testing, UI, and status |
+Open `http://localhost:3000`. `Ctrl+C` stops the local services; stop the Kaggle session separately. Nothing is deployed by this command.
+
+For exact setup, secrets, notebook order, Linux commands and troubleshooting, use [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+## Demo evidence
+
+Ready-to-use GeoTIFF scenes and prompts are in [`input/`](input/README.md):
+
+- a single RGB/multispectral scene,
+- a Nepal before/after visual pair,
+- co-registered Sentinel-2 optical + Sentinel-1 SAR pairs for India, Ghana and Mekong,
+- reference labels isolated in a clearly marked folder and never used as inference input.
+
+JPG, PNG and WebP are accepted for visual exploration. GeoTIFF is required when CRS, transform, verified bands, metric area or sensor-specific spectral analysis matters.
+
+## Repository structure
+
+```text
+app/                 React/Vinext routes and same-origin API proxy
+backend/             FastAPI controller, validation, planning, reports, persistence
+components/          Shared product UI and evidence rendering
+input/               Named presentation scenes, checksums and provenance
+lib/                 Browser/server API client utilities
+ml/                  Reusable preprocessing, model and evaluation library
+model_service/       GPU inference contracts and adapters
+notebooks/
+  kaggle-run-all/    Canonical upload-ready training/evaluation/server notebooks
+  patches/           Source patches embedded by the notebook build pipeline
+scripts/             Setup, notebook generation, evaluation and smoke checks
+upgrade/             Selected trained weights plus immutable manifests/metrics
+docs/                Project book, runbook, evaluation evidence and screenshots
+```
 
 ## Verification
 
 ```powershell
-Set-Location D:\Projects\Sih-2026
-& "$env:USERPROFILE\.venvs\satquery-cloud\Scripts\python.exe" -m pytest backend\tests ml\tests -q
-& "$env:USERPROFILE\.venvs\satquery-cloud\Scripts\python.exe" -m ruff check backend ml model_service scripts
-node --test tests/proxy.test.mjs
+./.venv/Scripts/python.exe -m pytest backend/tests ml/tests -q
+npm run test:proxy
 npm run lint
 npm run build
 ```
 
-The complete five-workflow check is documented in [SIH_DEMO_RUNBOOK.md](docs/SIH_DEMO_RUNBOOK.md)
-and automated by `scripts/sih-acceptance.py`. It rejects simulator responses by default. Add
-`--auto-route` to exercise query-driven selection for single VQA, caption, grounding, change and
-optical/SAR analysis, with provenance, trace, overlays and reports. `--allow-simulated` is for
-explicit plumbing tests only, never model acceptance. Neither mode measures benchmark accuracy.
+These checks establish software integrity, not live-provider availability or hidden-sensor accuracy.
 
-## Documentation index
+## Documentation
 
-| Document | Purpose |
-|---|---|
-| [PRD](docs/PRD.md) | Users, scope, requirements, acceptance criteria |
-| [Architecture](docs/ARCHITECTURE.md) | Components, boundaries, deployment-neutral design |
-| [System design](docs/SYSTEM_DESIGN.md) | Runtime, data, failure, concurrency, and security design |
-| [Pipeline](docs/PIPELINE.md) | Training, release, and inference flows |
-| [Local development](docs/LOCAL_DEVELOPMENT.md) | Exact laptop and free-GPU commands |
-| [Kaggle + ngrok runbook](docs/NGROK_KAGGLE_RUNBOOK.md) | Secrets, notebook cells, tunnel, wiring and shutdown |
-| [Data model](docs/DATA_MODEL.md) | Image, location context, result, evidence and provenance schemas |
-| [API](docs/API.md) | Endpoints, schemas, lifecycle, error semantics |
-| [Testing](docs/TESTING.md) | Unit, integration, build, and real-model gates |
-| [Model-quality roadmap](docs/MODEL_QUALITY_ROADMAP.md) | Separate VLM, segmentation, change and fusion quality gates |
-| [SIH compliance matrix](docs/SIH_COMPLIANCE_MATRIX.md) | Requirement-by-requirement status and evaluation gaps |
-| [SIH demonstration runbook](docs/SIH_DEMO_RUNBOOK.md) | Exact five-workflow acceptance procedure |
-| [Security](docs/SECURITY.md) | Threat model, secrets, uploads, and retention |
-| [UI design](docs/DESIGN_UI.md) | Visual system and interaction rules |
-| [Progress](docs/PROGRESS.md) | Evidence-backed completion and remaining work |
-| [Hosted-resource status](docs/UNDEPLOYMENT_STATUS.md) | What is private, preserved, temporary, or removed |
+- [Project book](docs/PROJECT_BOOK.md): problem statement, solution, agents, datasets, training, architecture, communication, methodology and judge Q&A.
+- [Runbook](docs/RUNBOOK.md): Kaggle, ngrok, secrets, local startup, evidence modes and troubleshooting.
+- [Evaluation](docs/EVALUATION.md): exact metrics, denominators, model-selection state and known gaps.
+- [API](docs/API.md): controller endpoints and contracts.
+- [Security](docs/SECURITY.md): trust boundaries, secrets, uploads and production hardening.
 
-## Secret warning
+## License and attribution
 
-A Hugging Face token was pasted into chat earlier. Treat it as compromised: revoke it in Hugging
-Face settings and create a new least-privilege token only when a future hosting action actually
-requires one. Local inference against the public adapter requires no Hugging Face token.
+Code and weights do not override upstream terms. BigEarthNet, LoveDA, SECOND/CDVQA, Sen1Floods11, Qwen, SegFormer and TerraMind retain their own licenses and usage constraints. In particular, LoveDA’s academic/non-commercial and source-imagery conditions must be reviewed before reuse. See the attribution table in [PROJECT_BOOK.md](docs/PROJECT_BOOK.md).

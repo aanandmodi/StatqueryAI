@@ -40,7 +40,7 @@ def build_container(settings: Settings) -> AppContainer:
     settings.prepare_directories()
     settings.assert_safe_production_configuration()
     repository = SQLiteRepository(settings.database_path)
-    asset_store = LocalAssetStore(settings.upload_dir, settings.max_upload_bytes)
+    asset_store = LocalAssetStore(settings.upload_dir, settings.effective_upload_limit_bytes)
     artifact_store = LocalArtifactStore(settings.artifact_dir)
     validator = RasterValidator(settings)
     policy_router = PolicyRouter(settings)

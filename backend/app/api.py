@@ -96,7 +96,7 @@ async def capabilities(request: Request) -> dict[str, Any]:
             )
         },
         "limits": {
-            "upload_bytes": state.settings.max_upload_bytes,
+            "upload_bytes": state.settings.effective_upload_limit_bytes,
             "raster_pixels": state.settings.max_raster_pixels,
             "raster_bands": state.settings.max_raster_bands,
             "plan_steps": state.settings.max_plan_steps,

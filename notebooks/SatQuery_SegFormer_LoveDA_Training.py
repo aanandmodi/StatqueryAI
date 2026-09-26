@@ -94,11 +94,12 @@ class Config:
     seed: int = 42
     crop_size: int = 384
     epochs: int = 20
-    training_revision: str = "r2-scale-matched-finite"
+    training_revision: str = "r3-incumbent-protected"
     train_batch_size: int = 1
     eval_batch_size: int = 1
     gradient_accumulation_steps: int = 8
     learning_rate: float = 6e-5
+    warm_start_learning_rate: float = 2e-5
     weight_decay: float = 0.01
     dice_weight: float = 0.5
     num_workers: int = 0
@@ -109,9 +110,9 @@ class Config:
 CFG = Config()
 assert 0 < CFG.train_fraction <= 1
 ROOT = Path(
-    "/kaggle/working/satquery-segmentation-r2"
+    "/kaggle/working/satquery-segmentation-r3"
     if Path("/kaggle/working").exists()
-    else "/content/satquery-segmentation-r2"
+    else "/content/satquery-segmentation-r3"
 )
 DATA_DIR = ROOT / "data"
 OUTPUT_DIR = ROOT / "best-model"
@@ -398,8 +399,9 @@ if warm_candidates:
     old_manifest = json.loads((old_root / "training_manifest.json").read_text())
     old_hashes = json.loads((old_root / "sha256_manifest.json").read_text())
     weight_sha = hashlib.sha256((old_root / "model.safetensors").read_bytes()).hexdigest()
-    if old_hashes.get("model.safetensors") != weight_sha:
-        raise RuntimeError("Previous 02 checkpoint checksum mismatch.")
+    for name in ("model.safetensors", "config.json", "training_manifest.json", "preprocessor_config.json"):
+        if old_hashes.get(name) != hashlib.sha256((old_root / name).read_bytes()).hexdigest():
+            raise RuntimeError(f"Previous 02 checksum mismatch: {name}")
     old_config = json.loads((old_root / "config.json").read_text())
     if {int(k): v for k, v in old_config["id2label"].items()} != ID2LABEL:
         raise RuntimeError("Previous 02 label order differs; refuse unsafe warm start.")
@@ -537,7 +539,7 @@ from transformers import EarlyStoppingCallback, TrainingArguments
 
 training_args = TrainingArguments(
     output_dir=str(ROOT / "checkpoints"),
-    learning_rate=CFG.learning_rate,
+    learning_rate=CFG.warm_start_learning_rate if warm_start else CFG.learning_rate,
     weight_decay=CFG.weight_decay,
     num_train_epochs=CFG.epochs,
     per_device_train_batch_size=CFG.train_batch_size,
@@ -588,8 +590,64 @@ from torch.utils.data import Subset
 print("Preflight: streaming evaluation on two validation scenes")
 trainer.evaluate(eval_dataset=Subset(validation_dataset, range(min(2, len(validation_dataset)))), metric_key_prefix="preflight")
 trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=6))
+
+# Archive every future epoch's WEIGHTS separately from Trainer's rotating optimizer
+# checkpoints. Archives are evidence, not automatically approved serving candidates.
+from transformers import TrainerCallback
+from safetensors.torch import save_file
+import shutil
+
+
+class PreserveEpochWeights(TrainerCallback):
+    def on_save(self, args, state, control, model=None, **kwargs):
+        if model is None or not state.is_world_process_zero:
+            return control
+        archive = OUTPUT_DIR / "archived_epochs"
+        archive.mkdir(parents=True, exist_ok=True)
+        name = f"step-{state.global_step:08d}"
+        path = archive / f"{name}.safetensors"
+        if path.exists():
+            raise RuntimeError(f"Archive already exists; preserve this run and use a fresh output: {path}")
+        weights = {key: value.detach().cpu().contiguous() for key, value in model.state_dict().items()}
+        needed = sum(t.numel() * t.element_size() for t in weights.values())
+        if shutil.disk_usage(archive).free < needed + 256 * 1024**2:
+            raise RuntimeError("Insufficient disk to preserve epoch weights. Existing checkpoints remain saved.")
+        if not all(torch.isfinite(t).all() for t in weights.values()):
+            raise FloatingPointError("Refusing to archive non-finite epoch weights.")
+        save_file(weights, path)
+        metadata = {
+            "role": "archived_training_candidate_not_released",
+            "epoch": state.epoch, "global_step": state.global_step,
+            "weights_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "config": asdict(CFG), "train_selection_sha256": selection_sha256,
+            "warm_start": warm_start,
+            "evaluation": next((row for row in reversed(state.log_history) if "eval_loss" in row), None),
+        }
+        (archive / f"{name}.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        print(f"Preserved epoch {state.epoch} weights: {path}")
+        return control
+
+
+trainer.add_callback(PreserveEpochWeights())
+incumbent_metrics = trainer.evaluate() if warm_start else None
+if incumbent_metrics:
+    print("INCUMBENT validation (before any new training):", incumbent_metrics)
 trainer.train(resume_from_checkpoint=str(checkpoints[-1]) if checkpoints else None)
 final_metrics = trainer.evaluate()
+candidate_metrics = dict(final_metrics)
+selection_decision = "new_candidate"
+if incumbent_metrics:
+    # Never replace a saved model merely because it trained for more epochs. Selection uses
+    # validation only; no held-out test or live-audit case is used to tune these weights.
+    protected_metrics = ("eval_mean_iou", "eval_iou_water", "eval_iou_forest", "eval_iou_agricultural")
+    improved = final_metrics["eval_release_balance"] > incumbent_metrics["eval_release_balance"]
+    nonregressing = all(final_metrics[k] >= incumbent_metrics[k] for k in protected_metrics)
+    if not (improved and nonregressing):
+        from safetensors.torch import load_file
+        trainer.model.load_state_dict(load_file(old_root / "model.safetensors"), strict=True)
+        final_metrics = trainer.evaluate()
+        selection_decision = "retained_incumbent_candidate_did_not_improve_without_regression"
+print({"selection_decision": selection_decision})
 print(json.dumps(final_metrics, indent=2, sort_keys=True))
 
 # %% [markdown]
@@ -756,13 +814,21 @@ manifest = {
     },
     "config": asdict(CFG),
     "warm_start": warm_start,
+    "preprocessing": {"mode": "training_matched_full_scene", "input_size": CFG.crop_size,
+                      "image_resize": "opencv_linear", "logit_resize": "bilinear_align_corners_false"},
+    "selection_decision": selection_decision,
+    "incumbent_metrics": incumbent_metrics,
+    "candidate_metrics_before_retention": candidate_metrics,
+    "archived_epoch_weights": sorted(str(p.relative_to(OUTPUT_DIR)).replace("\\", "/")
+                                      for p in (OUTPUT_DIR / "archived_epochs").glob("*.safetensors")),
+    "candidate_checkpoint": trainer.state.best_model_checkpoint,
 }
 (OUTPUT_DIR / "training_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 hashes = {}
-for path in sorted(OUTPUT_DIR.iterdir()):
+for path in sorted(OUTPUT_DIR.rglob("*")):
     if path.is_file() and path.name != "sha256_manifest.json":
-        hashes[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        hashes[path.relative_to(OUTPUT_DIR).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
 (OUTPUT_DIR / "sha256_manifest.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
 (EVAL_DIR / "validation_metrics.json").write_text(
     json.dumps(final_metrics, indent=2, sort_keys=True), encoding="utf-8"

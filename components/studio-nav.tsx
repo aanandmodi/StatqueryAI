@@ -6,9 +6,10 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
+import { SatQueryLogo } from '@/components/satquery-logo';
 
 const links = [
-  { href: '/', label: 'Analyze', icon: ScanSearch },
+  { href: '/workspace', label: 'Analyze', icon: ScanSearch },
   { href: '/cases', label: 'Cases', icon: Boxes },
   { href: '/archive', label: 'History', icon: FileClock },
   { href: '/method', label: 'Methods', icon: ShieldCheck },
@@ -16,11 +17,8 @@ const links = [
 
 export function StudioNav({ active }: { active: string }) {
   return (
-    <aside className="studio-sidebar" aria-label="Primary navigation">
-      <Link className="sidebar-brand" href="/" aria-label="SatQuery home">
-        <span>SQ</span>
-        <strong>SatQuery</strong>
-      </Link>
+    <header className="studio-sidebar">
+      <SatQueryLogo className="sidebar-brand" />
       <nav>
         {links.map(({ href, label, icon: Icon }) => (
           <Link
@@ -38,6 +36,6 @@ export function StudioNav({ active }: { active: string }) {
         <span />
         <CircleDot />
       </div>
-    </aside>
+    </header>
   );
 }

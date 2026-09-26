@@ -7,7 +7,7 @@ Binary mask evidence is stored locally with `type=mask`, `geometry.encoding=bina
 an analysis-scoped `artifact_url`. `GET /analyses/{id}/masks/ev_mask_1` returns binary PNG;
 `?colored=true` returns a transparent cyan PNG for the UI. Only mask IDs belonging to the selected
 analysis are served. The source width/height, mask width/height, valid/selected pixel counts,
-coverage, projected area and method are included in geometry. See [quality semantics](ANALYSIS_QUALITY.md).
+coverage, projected area and method are included in geometry. See [evaluation and score semantics](EVALUATION.md).
 
 Base URL: `http://127.0.0.1:8000/v1`. The frontend normally calls the same endpoints through
 `http://localhost:3000/api/satquery/*` so the browser remains same-origin.
@@ -27,7 +27,7 @@ History field names are `acquisition_date`, `start_date`, `end_date`; results ex
 `registration_basis=geospatial|pixel_grid`, defaults strict/geospatial. Pixel-grid declarations
 are temporal-only and require compatibility checks. Sensor modalities still require TIFF.
 Rejected stored assets cannot be previewed. Context providers receive coordinates/dates, not images.
-See [Studio guide](STUDIO_GUIDE.md) for bounds and source semantics.
+See the [project book](PROJECT_BOOK.md) for evidence bounds and source semantics.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|

@@ -35,6 +35,7 @@ def write_geotiff(path: Path) -> None:
 def test_upload_analyse_trace_and_report(tmp_path: Path):
     runtime = tmp_path / "runtime"
     settings = Settings(
+        _env_file=None,
         environment="test",
         data_dir=runtime,
         database_path=runtime / "db.sqlite3",

@@ -45,6 +45,10 @@ def artifact(root, role):
             }
         )
     )
+    (folder / "preprocessor_config.json").write_text('{}')
+    (folder / "sha256_manifest.json").write_text(json.dumps({
+        p.name: support.file_sha256(p) for p in folder.iterdir() if p.name != 'sha256_manifest.json'
+    }))
     return folder
 
 
@@ -52,6 +56,9 @@ def test_server_artifacts_require_all_roles_passing_gates_and_matching_bytes(tmp
     folders = {role: artifact(tmp_path, role) for role in ("segmentation", "change", "fusion")}
     assert support.find_trained_artifacts(tmp_path) == folders
     (folders["change"] / "release_gate.json").write_text("{}")
+    hashes = json.loads((folders["change"] / "sha256_manifest.json").read_text())
+    hashes['release_gate.json'] = support.file_sha256(folders['change'] / 'release_gate.json')
+    (folders['change'] / 'sha256_manifest.json').write_text(json.dumps(hashes))
     with pytest.raises(ValueError, match="passing validation/test"):
         support.find_trained_artifacts(tmp_path)
     (folders["fusion"] / "model.safetensors").write_bytes(b"changed-after-manifest")
@@ -107,7 +114,7 @@ def test_official_csv_download_maps_channels_and_checks_each_object(tmp_path, mo
 
 def test_pack_is_standalone_and_final_server_orders_artifacts_before_tunnel():
     files = sorted((ROOT / "notebooks/kaggle-run-all").glob("*.ipynb"))
-    assert len(files) == 6
+    assert len(files) == 10  # Also includes distinct R4 refinement; historical R3 is retained.
     for path in files:
         nb = nbformat.read(path, as_version=4)
         nbformat.validate(nb)
@@ -115,7 +122,7 @@ def test_pack_is_standalone_and_final_server_orders_artifacts_before_tunnel():
             if cell.cell_type == "code":
                 compile(cell.source, str(path), "exec")
                 assert cell.execution_count is None and cell.outputs == []
-    server = nbformat.read(files[-1], as_version=4)
+    server = nbformat.read(ROOT / "notebooks/kaggle-run-all/06_All_Models_Ngrok_Server.ipynb", as_version=4)
     sources = [c.source for c in server.cells if c.cell_type == "code"]
     discovery = next(
         i for i, s in enumerate(sources) if "trained_paths = find_trained_artifacts" in s

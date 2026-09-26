@@ -1,8 +1,0 @@
-{
-  "01_Qwen_Validation_and_Scorecard.ipynb": "a9d12c8d11adc6a9d8de9b9f1c91db4c5fa83a4d65827dddaaa179de56f6c487",
-  "02_Train_Vegetation_Water_Masks.ipynb": "331532a9a9aa85c8d4ae645848df285116949b49dab9e6f1f186e163d662458a",
-  "03_Train_Temporal_Change.ipynb": "0ad29a4880b3c8726438d676bb5e80338226c8c191fae021f019628dcbacea6c",
-  "04_Train_Optical_SAR_Flood_Masks.ipynb": "2554c45d261c6580c4f7316f8d9a682c63497fc785a56274d9b02d8240cbaffa",
-  "05_Qwen_Final_Test.ipynb": "6e7ffae59e8cfd3563638a884461e466f9a30dbeac8db22a8b69416c377fb21d",
-  "06_All_Models_Ngrok_Server.ipynb": "c838e1421f4cd6964e9e4dfb64c6a5e91195be7da0ff97dcb8d197496abcc6e4"
-}

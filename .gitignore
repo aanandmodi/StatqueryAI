@@ -58,9 +58,13 @@ next-env.d.ts
 /backend/data/
 /data/runtime/
 
-# New cloud training binaries stay local; commit metrics/provenance, not failed checkpoints.
-/upgrade/**/*.safetensors
+# Selected inference weights are versioned; optimizer/checkpoint state stays local.
 /upgrade/**/*.pt
 /upgrade/**/*.bin
 /upgrade/**/*.zip
-/upgrade/03_change_inference/artifacts/*predictions.jsonl
+/upgrade/**/*predictions.jsonl
+
+# Local cloud outputs and duplicate generated pack; preserve on disk, not in source control.
+/notebook-outputs/
+/notebooks/SatQuery_Kaggle_Run_All_Pack/
+/.local-backups/

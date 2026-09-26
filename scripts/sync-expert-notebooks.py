@@ -83,6 +83,7 @@ runtime_files = {
     "satquery_ml/sensors.py": sensor_source,
     "satquery_model_service/contracts.py": (root / "model_service/satquery_model_service/contracts.py").read_text(encoding="utf-8"),
     "satquery_model_service/paired_adapters.py": (root / "model_service/satquery_model_service/paired_adapters.py").read_text(encoding="utf-8"),
+    "satquery_model_service/quality_checks.py": (root / "model_service/satquery_model_service/quality_checks.py").read_text(encoding="utf-8"),
 }
 bundle = ("import sys, json, hashlib\nfrom pathlib import Path\n"
           "PAIR_RUNTIME_ROOT = Path('/kaggle/working/satquery_pair_runtime_v2')\n"

@@ -135,7 +135,7 @@ export default function Casebook() {
               <div className="document-empty">
                 <strong>No matching investigation.</strong>
                 <p>Clear the filters or create a new analysis.</p>
-                <Link href="/">Open the investigation studio</Link>
+                <Link href="/workspace">Open the investigation studio</Link>
               </div>
             )}
           </div>

@@ -1,8 +1,12 @@
 {
-  "01_Qwen_Validation_and_Scorecard.ipynb": "a9d12c8d11adc6a9d8de9b9f1c91db4c5fa83a4d65827dddaaa179de56f6c487",
-  "02_Train_Vegetation_Water_Masks.ipynb": "331532a9a9aa85c8d4ae645848df285116949b49dab9e6f1f186e163d662458a",
-  "03_Train_Temporal_Change.ipynb": "0ad29a4880b3c8726438d676bb5e80338226c8c191fae021f019628dcbacea6c",
-  "04_Train_Optical_SAR_Flood_Masks.ipynb": "2554c45d261c6580c4f7316f8d9a682c63497fc785a56274d9b02d8240cbaffa",
-  "05_Qwen_Final_Test.ipynb": "6e7ffae59e8cfd3563638a884461e466f9a30dbeac8db22a8b69416c377fb21d",
-  "06_All_Models_Ngrok_Server.ipynb": "c838e1421f4cd6964e9e4dfb64c6a5e91195be7da0ff97dcb8d197496abcc6e4"
+  "00_Audit_Runtime_Preprocessing.ipynb": "3e3f9d54707de652d9d3589601721f84705c11e65756f32ebc5504dcbe4a2962",
+  "01_Qwen_Validation_and_Scorecard.ipynb": "05596c1c906011eac02825ba6db4c3ba904c01a7b00409e22cf5ec366f6e449c",
+  "02_R4_Refine_Strict_Segmentation.ipynb": "5aa1417d360d5daf0ba80b61ea990c59dd6ec5e58dcd2b4e3e2e37fb78b916de",
+  "02_Train_Vegetation_Water_Masks.ipynb": "0233ba6593385913ce37adcdfafeee994cecffce4e2a4396c85c94f02cf15556",
+  "02B_Preserve_Training_Checkpoints.ipynb": "b0b7d48304990a6cef853ea3a1cd7714ea9fb83f437e814e53dac5fe9353be99",
+  "03_Train_Temporal_Change.ipynb": "ff98266214e8bf990fdc5291c208018a7734f1983646679755c9b86f3a1efe10",
+  "04_Train_Optical_SAR_Flood_Masks.ipynb": "9624bcf6e855224873dde90fc3d9fff7ecbd3d968aeac56efbc43a4f8c30565b",
+  "05_Qwen_Final_Test.ipynb": "d63e64d4da130ff94d1c0c1757f6b27ed89118e18501a6dbe6becffb079ea373",
+  "06_All_Models_Ngrok_Server.ipynb": "bcf202853f4db1d5cae6dde670ee42ef93ede7752b41d24e85dfb511104a2efb",
+  "06_Demo_Current_Models_Ngrok.ipynb": "baa7038fa1a4b1bbe0addacbcf555347dce5e560e7ae63b4c5a212a1613f62f8"
 }

@@ -222,6 +222,8 @@ class Confidence(StrictModel):
     calibration_version: str
     factors: dict[str, Annotated[float, Field(ge=0, le=1)]]
     meaning: str
+    correctness_probability: Annotated[float, Field(ge=0, le=1)] | None = None
+    probability_status: str = "unavailable_no_matching_calibration"
 
 
 class SpecialistOutput(StrictModel):

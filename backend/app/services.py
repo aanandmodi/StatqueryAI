@@ -16,7 +16,7 @@ from app.core.validation import RasterValidator
 from app.errors import ConflictError, SatQueryError
 from app.models.gateway import SpecialistGateway
 from app.models.mask_comparison import compare_mask_extent
-from app.models.masks import materialize_masks, spectral_water_output
+from app.models.masks import fusion_water_crosscheck, materialize_masks, spectral_water_output
 from app.reporting import build_pdf_report
 from app.repository import SQLiteRepository
 from app.schemas import (
@@ -220,6 +220,11 @@ class AnalysisService:
                             self.asset_store,
                         )
                     outputs.append(output)
+                    if not output.model_version.startswith("demo-simulator"):
+                        output = await asyncio.to_thread(
+                            fusion_water_crosscheck, output, step, task_assets[step.step_id], self.asset_store
+                        )
+                        outputs[-1] = output
                     step_outputs[step.step_id] = output
                     trace.append(
                         TraceEvent(
@@ -232,7 +237,11 @@ class AnalysisService:
                             status="skipped"
                             if output.model_version.endswith(":abstained")
                             else "succeeded",
-                            policy_reason=step.policy_reason,
+                            policy_reason=step.policy_reason + (
+                                " | DEGRADED: learned specialist failed; analytical fallback executed"
+                                if any(f.get("name") == "learned_specialist_failure" for f in output.facts)
+                                else ""
+                            ),
                             permitted_params=step.permitted_params,
                             duration_ms=self._duration_ms(started),
                         )

@@ -1,6 +1,12 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source(none);
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+
+/* Never scan downloaded model weights, datasets or notebook prediction logs. */
+@source './';
+@source '../components';
+@source '../lib';
+@source '../hooks';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -313,4 +319,3 @@ a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visi
 .structured-kv-card .kv-value { font-size: 14.5px; line-height: 1.65; color: #e2e8f0; }
 .structured-blockquote { position: relative; margin: 14px 0; padding: 12px 16px; border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08); border-radius: 0 8px 8px 0; color: #fde68a; font-size: 14px; line-height: 1.6; }
 .structured-paragraph { font-size: 14.5px; line-height: 1.8; color: #cbd5e1; margin: 10px 0; max-width: 85ch; }
-

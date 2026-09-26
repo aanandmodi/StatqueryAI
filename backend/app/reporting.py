@@ -85,11 +85,11 @@ def build_pdf_report(record: AnalysisRecord, destination: Path) -> Path:
         author="SatQuery",
     )
     result = record.result
-    uncalibrated = "uncalibrated" in result.confidence.calibration_version
+    uncalibrated = result.confidence.correctness_probability is None
     confidence_text = (
         f"Evidence quality: {result.confidence.level}; correctness probability is unavailable. "
         if uncalibrated
-        else f"{result.confidence.score:.1%} ({result.confidence.level}). "
+        else f"{result.confidence.correctness_probability:.1%} calibrated correctness estimate. "
     ) + result.confidence.meaning
     story = [
         Paragraph("SatQuery analysis report", styles["SatTitle"]),

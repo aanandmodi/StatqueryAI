@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
+import re
 
 import httpx
 from pydantic import Field
@@ -20,6 +21,14 @@ class IntentProposal(StrictModel):
 async def propose_intents(settings, query, assets):
     if settings.planner_backend == "policy" or settings.model_backend != "http":
         return None, "deterministic-policy (learned planner not configured)"
+    # Exact simple intents do not need a second GPU generation before inference.
+    # Compound/ambiguous questions still use the learned proposer and closed DAG compiler.
+    if re.fullmatch(
+        r"\s*(?:show|highlight|outline|mark|segment)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?"
+        r"(?:water(?:\s+bodies)?|vegetation|forest|buildings?|roads?)"
+        r"(?:\s+in\s+(?:this|the)\s+(?:image|scene|region))?[.!?]*\s*", query, re.I
+    ):
+        return None, "deterministic-fast-path (single explicit spatial intent)"
     headers = {"ngrok-skip-browser-warning": "1"}
     if settings.model_service_token:
         headers["Authorization"] = f"Bearer {settings.model_service_token.get_secret_value()}"

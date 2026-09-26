@@ -5,6 +5,8 @@ PAIR_ARTIFACT_DIRS = {"change": "", "fusion": ""}
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
+from fastapi.routing import APIRoute
 import tempfile
 
 from satquery_model_service.paired_adapters import ChangeAdapter, FusionAdapter
@@ -64,11 +66,15 @@ async def combined_ready():
             "pair_artifacts": {key: value.version for key, value in pair_adapters.items()}}
 
 
-for route in app.routes:
+for route_index, route in enumerate(app.routes):
     if getattr(route, "path", None) == "/v1/infer/{task}":
         route.endpoint = route.dependant.call = paired_infer
     elif getattr(route, "path", None) == "/ready":
-        route.endpoint = route.dependant.call = combined_ready
+        # A running older notebook retains dict[str, str] in its compiled handler.
+        # Rebuild the route, not only its endpoint, to accept nested capability metadata.
+        app.router.routes[route_index] = APIRoute(
+            "/ready", combined_ready, methods=["GET"], response_model=dict[str, Any], name="ready"
+        )
 app.openapi_schema = None
 print("Optional paired routes installed. Trained capabilities:", sorted(pair_adapters))
 print("Qwen remains available. No paid endpoint, new tunnel, training job or automatic fallback was created.")

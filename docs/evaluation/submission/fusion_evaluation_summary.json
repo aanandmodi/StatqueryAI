@@ -1,0 +1,66 @@
+{
+  "validation": {
+    "fused": {
+      "flood_iou": 0.7132785782940684,
+      "flood_dice": 0.832647518425507,
+      "flood_precision": 0.8576743170916811,
+      "flood_recall": 0.8090398652442448,
+      "mean_iou": 0.8369619516191906,
+      "mean_absolute_flood_fraction_error": 0.013111584341438505,
+      "valid_pixels": 3878052,
+      "chips": 89
+    },
+    "s2": {
+      "flood_iou": 0.7026683216947048,
+      "flood_dice": 0.8253731073064459,
+      "flood_precision": 0.8525014024808327,
+      "flood_recall": 0.7999181171626427,
+      "mean_iou": 0.8308766556898852,
+      "mean_absolute_flood_fraction_error": 0.013799458192374874,
+      "valid_pixels": 3878052,
+      "chips": 89
+    },
+    "s1": {
+      "flood_iou": 0.5579286544713038,
+      "flood_dice": 0.7162441654436886,
+      "flood_precision": 0.8150058350719162,
+      "flood_recall": 0.6388311809844657,
+      "mean_iou": 0.7489560609159118,
+      "mean_absolute_flood_fraction_error": 0.0354098093955146,
+      "valid_pixels": 3878052,
+      "chips": 89
+    }
+  },
+  "test": {
+    "fused": {
+      "flood_iou": 0.7102717996612825,
+      "flood_dice": 0.8305952303042722,
+      "flood_precision": 0.8577088235685133,
+      "flood_recall": 0.805143319487748,
+      "mean_iou": 0.8327132079261332,
+      "mean_absolute_flood_fraction_error": 0.017667573567650963,
+      "valid_pixels": 3908105,
+      "chips": 90
+    },
+    "s2": {
+      "flood_iou": 0.7099347114641407,
+      "flood_dice": 0.8303646995460491,
+      "flood_precision": 0.8538829243634686,
+      "flood_recall": 0.8081072592604919,
+      "mean_iou": 0.8324161110395157,
+      "mean_absolute_flood_fraction_error": 0.01910658862863319,
+      "valid_pixels": 3908105,
+      "chips": 90
+    },
+    "s1": {
+      "flood_iou": 0.6055663844296736,
+      "flood_dice": 0.7543336610709893,
+      "flood_precision": 0.8270621101677674,
+      "flood_recall": 0.6933622308794686,
+      "mean_iou": 0.7724133846394281,
+      "mean_absolute_flood_fraction_error": 0.033023624000847795,
+      "valid_pixels": 3908105,
+      "chips": 90
+    }
+  }
+}

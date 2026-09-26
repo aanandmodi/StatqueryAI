@@ -127,7 +127,9 @@ class ChangeAdapter:
             raise ValueError("Explicit time_a and time_b roles required")
         ordered = [pairs[role] for role in ("time_a", "time_b")]
         height, width = validate_pair([pair[1] for pair in ordered])
+        from satquery_model_service.quality_checks import bright_obstruction_risk, checked_change_answer, mask_description
         tensors, valid = [], np.ones((height, width), dtype=bool)
+        obstruction_risks = []
         for asset, path in ordered:
             if asset.modality not in {"optical", "multispectral"}:
                 raise ValueError(
@@ -142,6 +144,8 @@ class ChangeAdapter:
                         "CDVQA expert expects uint8 RGB previews, not unnormalized spectral DN"
                     )
                 raw = source.read(indexes, masked=True)
+                rgb = np.moveaxis(raw.filled(0), 0, -1)
+                obstruction_risks.append(bright_obstruction_risk(rgb, ~np.ma.getmaskarray(raw).any(axis=0)))
                 valid &= ~np.ma.getmaskarray(raw).any(axis=0) & (
                     source.dataset_mask() > 0
                 )
@@ -155,6 +159,18 @@ class ChangeAdapter:
                 ) / np.array([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
                 tensors.append(torch.from_numpy(array).unsqueeze(0).to(self.device))
         require_shared_support(valid)
+        if max(obstruction_risks) >= 0.05:
+            return SpecialistResponse(
+                task="change_vqa", text=(
+                    "Change interpretation withheld: bright neutral surfaces may obscure the scene. "
+                    "The RGB screen cannot distinguish clouds, snow or bright roofs. Supply a verified "
+                    "cloud/quality mask or a clear comparable pair; no change boundary or cause is asserted."
+                ), facts=[{"name": "obstruction_screen", "value": obstruction_risks,
+                           "semantics": "unvalidated review trigger, not cloud probability"}],
+                evidence=[], raw_score=0, score_kind="uncalibrated",
+                model_version=self.version + ":abstained",
+                warnings=["Conservative RGB review threshold (5%) triggered; false positives and missed clouds are possible."],
+            )
         tokens = [
             self.vocabulary.get(token, 1)
             for token in re.findall(r"[a-z0-9']+", payload.query.lower())
@@ -173,15 +189,24 @@ class ChangeAdapter:
             index, score = int(probabilities.argmax()), float(probabilities.max())
             candidate = mask_logits.sigmoid()[0, 0].cpu().numpy() >= 0.5
         candidate = resample_supported_mask(candidate, valid)
+        support = np.asarray(Image.fromarray(valid).resize(candidate.shape[::-1], Image.Resampling.NEAREST)).astype(bool)
+        accepted_answer = checked_change_answer(payload.query, self.answers[index])
         shape = candidate.shape[::-1]
         stream = io.BytesIO()
         Image.fromarray(candidate.astype(np.uint8) * 255).save(stream, format="PNG")
         return SpecialistResponse(
             task="change_vqa",
-            text=f"Learned closed-vocabulary ChangeVQA answer: {self.answers[index]}. "
-            "The separate mask predicts generic semantic change, not a target-specific loss or event cause.",
+            text=(
+                (f"Learned closed-vocabulary answer: {accepted_answer}. " if accepted_answer else
+                 "The answer head returned an incompatible answer type; no answer is asserted. ")
+                + mask_description(candidate, support)
+                + " The mask predicts generic semantic change, not target-specific loss. Cloud, shadow, "
+                "season and alignment can cause false changes; neither event cause nor damage is established."
+            ),
             facts=[
                 {"name": "answer_label", "value": self.answers[index]},
+                {"name": "answer_type_check", "value": "passed" if accepted_answer else "abstained"},
+                {"name": "obstruction_screen", "value": obstruction_risks, "semantics": "not a cloud probability"},
                 {"name": "execution_mode", "value": "learned_paired_change"},
             ],
             evidence=[
@@ -189,7 +214,7 @@ class ChangeAdapter:
                     id="ev_learned_change",
                     type="mask",
                     label="Learned semantic-change candidate",
-                    score=score,
+                    score=0.0,  # Answer softmax is not a mask-quality estimate.
                     coordinate_space="pixel",
                     asset_id=ordered[1][0].id,
                     geometry={
@@ -260,6 +285,7 @@ class FusionAdapter:
         from torch.nn import functional as F
         from PIL import Image
         from satquery_ml.sensors import sen1floods11_fusion_indexes
+        from satquery_model_service.quality_checks import mask_description
 
         if payload.step.task != "optical_sar_fusion" or len(paths) != 2:
             raise ValueError("Fusion requires exactly two registered modalities")
@@ -327,7 +353,11 @@ class FusionAdapter:
                 "The pixel-supervised TerraMind S1/S2 specialist marked "
                 f"{flood_fraction:.1%} of shared-valid pixels as flood/water candidates. "
                 "This is a Sen1Floods11-domain segmentation, not flood depth, cause, or a "
-                "validated Cartosat/RISAT result."
+                "validated Cartosat/RISAT result. "
+                + mask_description(candidate, support)
+                + " Both optical and radar inputs were used; their separate contribution on this scene "
+                "was not measured. Permanent water and new inundation cannot be separated without "
+                "a comparable pre-event observation. Built-up mapping is not trained by this flood head."
             ),
             facts=[
                 {"name": "flood_candidate_fraction", "value": round(flood_fraction, 6)},
