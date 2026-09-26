@@ -100,6 +100,7 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [showMasks, setShowMasks] = useState(true);
   const [maskOpacity, setMaskOpacity] = useState(0.4);
   const [activeAsset, setActiveAsset] = useState('');
+  const [activeAspectRatio, setActiveAspectRatio] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -230,7 +231,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
                         role="tab"
                         aria-selected={asset === activeAsset}
                         key={asset}
-                        onClick={() => setActiveAsset(asset)}
+                        onClick={() => {
+                          setActiveAspectRatio(null);
+                          setActiveAsset(asset);
+                        }}
                       >
                         Source {index + 1}
                       </button>
@@ -239,24 +243,34 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
                 )}
 
                 <figure className="case-scene-frame">
-                  <div className="case-mask-canvas">
-                    <Image
-                      width={1280}
-                      height={1280}
-                      unoptimized
-                      src={`/api/satquery/assets/${activeAsset}/preview`}
-                      alt="Selected original source"
-                    />
-                    {showMasks && maskEvidence.map((item) => (
+                  <div
+                    className={`case-mask-canvas ${activeAspectRatio ? 'has-image-ratio' : ''}`}
+                    style={activeAspectRatio ? { aspectRatio: String(activeAspectRatio) } : undefined}
+                  >
+                    <div className="case-pixel-layer">
                       <Image
-                        key={item.id}
                         fill
                         unoptimized
-                        style={{ opacity: maskOpacity, imageRendering: 'pixelated', pointerEvents: 'none' }}
-                        src={`/api/satquery/analyses/${id}/masks/${item.id}?colored=true`}
-                        alt={`${item.label} candidate overlay`}
+                        src={`/api/satquery/assets/${activeAsset}/preview`}
+                        alt="Selected original source"
+                        onLoad={(event) => {
+                          const { naturalWidth, naturalHeight } = event.currentTarget;
+                          if (naturalWidth > 0 && naturalHeight > 0) {
+                            setActiveAspectRatio(naturalWidth / naturalHeight);
+                          }
+                        }}
                       />
-                    ))}
+                      {showMasks && maskEvidence.map((item) => (
+                        <Image
+                          key={item.id}
+                          fill
+                          unoptimized
+                          style={{ opacity: maskOpacity, imageRendering: 'pixelated', pointerEvents: 'none' }}
+                          src={`/api/satquery/analyses/${id}/masks/${item.id}?colored=true`}
+                          alt={`${item.label} candidate overlay`}
+                        />
+                      ))}
+                    </div>
                   </div>
                   <figcaption>
                     <span>Original pixels with {showMasks ? maskEvidence.length : 0} visible candidate overlay{maskEvidence.length === 1 ? '' : 's'}</span>

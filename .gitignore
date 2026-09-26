@@ -68,3 +68,4 @@ next-env.d.ts
 /notebook-outputs/
 /notebooks/SatQuery_Kaggle_Run_All_Pack/
 /.local-backups/
+/.local-recovery/

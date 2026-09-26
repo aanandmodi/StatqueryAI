@@ -269,6 +269,39 @@ function EvidenceOverlay({ item }: { item: EvidenceItem }) {
   );
 }
 
+function ScenePixelLayer({
+  previewSource,
+  alt,
+  evidence,
+  showOverlay,
+  zoom,
+  sizes,
+}: {
+  previewSource: string;
+  alt: string;
+  evidence: EvidenceItem[];
+  showOverlay: boolean;
+  zoom: number;
+  sizes: string;
+}) {
+  return (
+    <div
+      className="scene-pixel-layer"
+      style={{ transform: `scale(${zoom})` }}
+    >
+      <Image
+        src={previewSource}
+        alt={alt}
+        fill
+        unoptimized
+        sizes={sizes}
+      />
+      {showOverlay &&
+        evidence.map((item) => <EvidenceOverlay key={item.id} item={item} />)}
+    </div>
+  );
+}
+
 export default function Home() {
   const canvasRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1265,37 +1298,29 @@ export default function Home() {
                     aspectRatio: `${assets[0].metadata?.width ?? 1}/${assets[0].metadata?.height ?? 1}`,
                     '--mask-opacity': maskOpacity,
                   } as CSSProperties}
-                >
-                  <div className="pair-comparison-layer">
-                    <Image
-                      src={`/api/satquery/assets/${assets[0].id}/preview`}
+                  >
+                    <div className="pair-comparison-layer">
+                    <ScenePixelLayer
+                      previewSource={`/api/satquery/assets/${assets[0].id}/preview`}
                       alt={`${assets[0].role.replaceAll('_', ' ')} source: ${assets[0].original_name}`}
-                      fill
-                      unoptimized
+                      evidence={result?.evidence.filter((item) => item.asset_id === assets[0].id) ?? []}
+                      showOverlay={showOverlay}
+                      zoom={canvasZoom}
                       sizes="(max-width: 1080px) 90vw, 55vw"
-                      style={{ transform: `scale(${canvasZoom})` }}
                     />
-                    {showOverlay &&
-                      result?.evidence
-                        .filter((item) => item.asset_id === assets[0].id)
-                        .map((item) => <EvidenceOverlay key={item.id} item={item} />)}
                   </div>
                   <div
                     className="pair-comparison-layer pair-comparison-reveal"
                     style={{ clipPath: `inset(0 0 0 ${pairSplit}%)` }}
                   >
-                    <Image
-                      src={`/api/satquery/assets/${assets[1].id}/preview`}
+                    <ScenePixelLayer
+                      previewSource={`/api/satquery/assets/${assets[1].id}/preview`}
                       alt={`${assets[1].role.replaceAll('_', ' ')} source: ${assets[1].original_name}`}
-                      fill
-                      unoptimized
+                      evidence={result?.evidence.filter((item) => item.asset_id === assets[1].id) ?? []}
+                      showOverlay={showOverlay}
+                      zoom={canvasZoom}
                       sizes="(max-width: 1080px) 90vw, 55vw"
-                      style={{ transform: `scale(${canvasZoom})` }}
                     />
-                    {showOverlay &&
-                      result?.evidence
-                        .filter((item) => item.asset_id === assets[1].id)
-                        .map((item) => <EvidenceOverlay key={item.id} item={item} />)}
                   </div>
                   <div className="pair-comparison-labels" aria-hidden="true">
                     <span>{assets[0].role.replaceAll('_', ' ')}</span>
@@ -1340,20 +1365,14 @@ export default function Home() {
                         } as CSSProperties
                       }
                     >
-                      <Image
-                        src={`/api/satquery/assets/${source.id}/preview`}
+                      <ScenePixelLayer
+                        previewSource={`/api/satquery/assets/${source.id}/preview`}
                         alt={source.original_name}
-                        fill
-                        unoptimized
+                        evidence={result?.evidence.filter((item) => item.asset_id === source.id) ?? []}
+                        showOverlay={showOverlay}
+                        zoom={canvasZoom}
                         sizes="40vw"
-                        style={{ transform: `scale(${canvasZoom})` }}
                       />
-                      {showOverlay &&
-                        result?.evidence
-                          .filter((item) => item.asset_id === source.id)
-                          .map((item) => (
-                            <EvidenceOverlay key={item.id} item={item} />
-                          ))}
                     </div>
                   </figure>
                 ))}
@@ -1374,13 +1393,13 @@ export default function Home() {
                 }
               >
                 {asset && previewSource ? (
-                  <Image
-                    src={previewSource}
+                  <ScenePixelLayer
+                    previewSource={previewSource}
                     alt={`Uncropped preview of ${asset.original_name}`}
-                    fill
+                    evidence={visibleEvidence}
+                    showOverlay={showOverlay}
+                    zoom={canvasZoom}
                     sizes="(max-width: 1050px) 60vw, 38vw"
-                    unoptimized
-                    style={{ transform: `scale(${canvasZoom})` }}
                   />
                 ) : (
                   <div className="empty-canvas-state">

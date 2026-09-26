@@ -586,3 +586,29 @@
   .evidence-card .pair-comparison,
   .evidence-card .paired-canvases { min-height: 370px; }
 }
+
+/*
+ * Pixel-accurate evidence canvases.
+ *
+ * Keep these overrides last: the refresh stylesheet is loaded after
+ * studio.css and its presentation-oriented minimum heights must never
+ * stretch a real raster away from its native aspect ratio. The source,
+ * masks and vector evidence now live in one scene-pixel-layer, so zoom and
+ * layout changes preserve their shared coordinate plane.
+ */
+.evidence-card .evidence-map.has-preview,
+.evidence-card .pair-comparison {
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+.evidence-card .paired-canvases {
+  min-height: 0;
+  align-items: start;
+}
+
+.evidence-card .paired-canvases figure {
+  width: 100%;
+  min-height: 0;
+  align-self: start;
+}
